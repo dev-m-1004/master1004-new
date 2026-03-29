@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 function formatKoreanPrice(value: number) {
   const eok = Math.floor(value / 10000)
@@ -19,10 +19,40 @@ type DongItem = {
 
 type SortType = 'latest' | 'price_desc' | 'price_asc'
 
-const ITEMS_PER_PAGE = 30
+type TransactionItem = {
+  id?: string | number
+  complex_id?: string | null
+  apartment_name?: string | null
+  price_krw?: number | null
+  area_m2?: number | null
+  floor?: number | null
+  deal_year?: number | null
+  deal_month?: number | null
+  deal_day?: number | null
+  lawd_code?: string | null
+  dong?: string | null
+  umd_name?: string | null
+}
+
+type ListApiResponse = {
+  ok?: boolean
+  message?: string
+  data?: TransactionItem[]
+  items?: TransactionItem[]
+  pagination?: {
+    page: number
+    pageSize: number
+    total: number
+    totalPages: number
+    hasMore: boolean
+  }
+  error?: string
+}
+
+const PAGE_SIZE = 30
 
 export default function Home() {
-  const [data, setData] = useState<any[]>([])
+  const [data, setData] = useState<TransactionItem[]>([])
   const [keyword, setKeyword] = useState('')
 
   const [sidoList, setSidoList] = useState<string[]>([])
@@ -39,27 +69,14 @@ export default function Home() {
   const [sortType, setSortType] = useState<SortType>('latest')
   const [currentPage, setCurrentPage] = useState(1)
 
-  async function loadInitialData() {
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  async function fetchList(page = 1, sort = sortType) {
     try {
       setLoading(true)
-
-      const res = await fetch('/api/list')
-      const json = await res.json()
-      setData(json.data || [])
-      setCurrentPage(1)
-    } catch (error) {
-      console.error('초기 목록 조회 실패', error)
-      setData([])
-      setCurrentPage(1)
-    } finally {
-      setLoading(false)
-      setInitialized(true)
-    }
-  }
-
-  async function fetchData() {
-    try {
-      setLoading(true)
+      setErrorMessage('')
 
       const params = new URLSearchParams()
 
@@ -67,22 +84,38 @@ export default function Home() {
       if (selectedLawdCode) params.set('lawdCode', selectedLawdCode)
       if (selectedDong) params.set('dong', selectedDong)
 
-      if (!params.toString()) {
-        const res = await fetch('/api/list')
-        const json = await res.json()
-        setData(json.data || [])
-        setCurrentPage(1)
-        return
+      if (selectedSido) {
+        // 기존 지역 API와의 호환을 위해 남겨둠
+        // route.ts에서 lawdCode 우선이므로 실제 필터는 lawdCode 중심
       }
 
-      const res = await fetch(`/api/list?${params.toString()}`)
-      const json = await res.json()
-      setData(json.data || [])
-      setCurrentPage(1)
-    } catch (error) {
+      params.set('page', String(page))
+      params.set('pageSize', String(PAGE_SIZE))
+      params.set('sort', sort)
+
+      const res = await fetch(`/api/list?${params.toString()}`, {
+        cache: 'no-store',
+      })
+
+      const json: ListApiResponse = await res.json()
+
+      if (!res.ok || json.ok === false) {
+        throw new Error(json.error || json.message || '목록 조회 실패')
+      }
+
+      const items = json.items || json.data || []
+      const pagination = json.pagination
+
+      setData(items)
+      setCurrentPage(pagination?.page || page)
+      setTotalCount(pagination?.total || items.length || 0)
+      setTotalPages(pagination?.totalPages || 1)
+    } catch (error: any) {
       console.error('목록 조회 실패', error)
       setData([])
-      setCurrentPage(1)
+      setTotalCount(0)
+      setTotalPages(1)
+      setErrorMessage(error?.message || '목록을 불러오지 못했습니다.')
     } finally {
       setLoading(false)
     }
@@ -115,7 +148,9 @@ export default function Home() {
   async function loadDong(sido: string, sigungu: string) {
     try {
       const res = await fetch(
-        `/api/regions/dong?sido=${encodeURIComponent(sido)}&sigungu=${encodeURIComponent(sigungu)}`
+        `/api/regions/dong?sido=${encodeURIComponent(
+          sido
+        )}&sigungu=${encodeURIComponent(sigungu)}`
       )
       const json = await res.json()
       setDongList(json.data || [])
@@ -125,47 +160,14 @@ export default function Home() {
     }
   }
 
-  function getDealTime(item: any) {
-    const year = Number(item.deal_year || 0)
-    const month = Number(item.deal_month || 0)
-    const day = Number(item.deal_day || 0)
-
-    return new Date(year, month - 1, day).getTime()
-  }
-
-  const sortedData = useMemo(() => {
-    const copied = [...data]
-
-    if (sortType === 'latest') {
-      return copied.sort((a, b) => getDealTime(b) - getDealTime(a))
-    }
-
-    if (sortType === 'price_desc') {
-      return copied.sort(
-        (a, b) => Number(b.price_krw || 0) - Number(a.price_krw || 0)
-      )
-    }
-
-    if (sortType === 'price_asc') {
-      return copied.sort(
-        (a, b) => Number(a.price_krw || 0) - Number(b.price_krw || 0)
-      )
-    }
-
-    return copied
-  }, [data, sortType])
-
-  const totalPages = Math.max(1, Math.ceil(sortedData.length / ITEMS_PER_PAGE))
-
-  const pagedData = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
-    const endIndex = startIndex + ITEMS_PER_PAGE
-    return sortedData.slice(startIndex, endIndex)
-  }, [sortedData, currentPage])
-
   useEffect(() => {
-    loadSido()
-    loadInitialData()
+    async function init() {
+      await loadSido()
+      await fetchList(1, 'latest')
+      setInitialized(true)
+    }
+
+    init()
   }, [])
 
   useEffect(() => {
@@ -202,21 +204,18 @@ export default function Home() {
     if (!initialized) return
 
     const timer = setTimeout(() => {
-      fetchData()
+      fetchList(1, sortType)
     }, 400)
 
     return () => clearTimeout(timer)
-  }, [keyword, selectedLawdCode, selectedDong, initialized])
+  }, [keyword, selectedLawdCode, selectedDong, sortType, initialized])
 
   useEffect(() => {
-    setCurrentPage(1)
-  }, [sortType])
+    if (!initialized) return
+    if (currentPage < 1) return
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages)
-    }
-  }, [currentPage, totalPages])
+    fetchList(currentPage, sortType)
+  }, [currentPage])
 
   return (
     <main className="min-h-screen px-6 py-10">
@@ -312,16 +311,25 @@ export default function Home() {
           </div>
         )}
 
+        {errorMessage && !loading && (
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-6 text-red-600">
+            {errorMessage}
+          </div>
+        )}
+
         {!loading && data.length > 0 && (
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-gray-500">
-              검색 결과 {data.length}건 · {currentPage}/{totalPages}페이지
+              검색 결과 {totalCount}건 · {currentPage}/{totalPages}페이지
             </div>
 
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setSortType('latest')}
+                onClick={() => {
+                  setSortType('latest')
+                  setCurrentPage(1)
+                }}
                 className={`rounded-full border px-4 py-2 text-sm ${
                   sortType === 'latest'
                     ? 'border-black bg-black text-white'
@@ -333,7 +341,10 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setSortType('price_desc')}
+                onClick={() => {
+                  setSortType('price_desc')
+                  setCurrentPage(1)
+                }}
                 className={`rounded-full border px-4 py-2 text-sm ${
                   sortType === 'price_desc'
                     ? 'border-black bg-black text-white'
@@ -345,7 +356,10 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setSortType('price_asc')}
+                onClick={() => {
+                  setSortType('price_asc')
+                  setCurrentPage(1)
+                }}
                 className={`rounded-full border px-4 py-2 text-sm ${
                   sortType === 'price_asc'
                     ? 'border-black bg-black text-white'
@@ -364,7 +378,7 @@ export default function Home() {
               검색 결과가 없습니다.
             </div>
           ) : (
-            pagedData.map((item, i) => (
+            data.map((item, i) => (
               <div
                 key={`${item.id || i}-${item.deal_year}-${item.deal_month}-${item.deal_day}`}
                 className="rounded-2xl border p-5 transition hover:bg-gray-50"
@@ -389,8 +403,8 @@ export default function Home() {
                       <div>지역코드: {item.lawd_code || '-'}</div>
                       <div>
                         거래일: {item.deal_year}.
-                        {String(item.deal_month).padStart(2, '0')}.
-                        {String(item.deal_day).padStart(2, '0')}
+                        {String(item.deal_month || '').padStart(2, '0')}.
+                        {String(item.deal_day || '').padStart(2, '0')}
                       </div>
                     </div>
                   </div>
@@ -398,10 +412,12 @@ export default function Home() {
                   <div className="shrink-0 text-right">
                     <div className="text-sm text-gray-500">거래가</div>
                     <div className="mt-1 text-xl font-bold text-orange-500">
-                      {item.price_krw ? formatKoreanPrice(item.price_krw) : '-'}
+                      {item.price_krw
+                        ? formatKoreanPrice(Number(item.price_krw))
+                        : '-'}
                     </div>
                     <div className="mt-2 text-sm text-gray-500">
-                      {item.area_m2}㎡ / {item.floor}층
+                      {item.area_m2 ?? '-'}㎡ / {item.floor ?? '-'}층
                     </div>
                   </div>
                 </div>
