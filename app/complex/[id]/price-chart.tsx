@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import {
   LineChart,
   Line,
@@ -24,11 +25,21 @@ export default function PriceChart({
 }: {
   data: { date: string; price: number }[]
 }) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return <div className="h-full min-h-[320px] w-full" />
+  }
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data}>
+    <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={320}>
+      <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
         <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+        <XAxis dataKey="date" tick={{ fontSize: 12 }} minTickGap={24} />
         <YAxis
           tickFormatter={(value) => formatKoreanPrice(Number(value))}
           tick={{ fontSize: 12 }}
@@ -42,6 +53,7 @@ export default function PriceChart({
           dataKey="price"
           strokeWidth={2}
           dot={{ r: 3 }}
+          isAnimationActive={false}
         />
       </LineChart>
     </ResponsiveContainer>

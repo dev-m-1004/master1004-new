@@ -26,6 +26,7 @@ export default function NaverMap({
 
   const [sdkReady, setSdkReady] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const clientId = process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID
 
   const candidates = useMemo(() => {
     return [
@@ -223,26 +224,34 @@ export default function NaverMap({
 
   return (
     <>
-      <Script
-        id="naver-map-script"
-        strategy="afterInteractive"
-        src={`https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID}&submodules=geocoder`}
-        onReady={() => {
-          const waitForService = () => {
-            if (window?.naver?.maps?.Service?.geocode) {
-              setSdkReady(true)
-              return
+      {clientId ? (
+        <Script
+          id="naver-map-script"
+          strategy="afterInteractive"
+          src={`https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${clientId}&submodules=geocoder`}
+          onReady={() => {
+            const waitForService = () => {
+              if (window?.naver?.maps?.Service?.geocode) {
+                setSdkReady(true)
+                return
+              }
+
+              readyTimerRef.current = setTimeout(waitForService, 100)
             }
 
-            readyTimerRef.current = setTimeout(waitForService, 100)
-          }
-
-          waitForService()
-        }}
-      />
+            waitForService()
+          }}
+        />
+      ) : null}
 
       <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900">단지 위치</h2>
+
+        {!clientId && (
+          <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">
+            NEXT_PUBLIC_NAVER_MAP_CLIENT_ID 환경변수가 없어 지도를 불러올 수 없습니다.
+          </div>
+        )}
 
         {errorMessage && (
           <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">

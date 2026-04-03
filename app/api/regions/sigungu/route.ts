@@ -14,18 +14,29 @@ export async function GET(req: NextRequest) {
   }
 
   const { data, error } = await supabase
-    .from('region_sigungus')
+    .from('regions')
     .select('sigungu_name')
     .eq('sido_name', sido)
+    .not('sigungu_name', 'is', null)
 
   if (error) {
-    return NextResponse.json({
-      message: '조회 실패',
-      error: error.message,
-    })
+    return NextResponse.json(
+      {
+        message: '조회 실패',
+        error: error.message,
+      },
+      { status: 500 }
+    )
   }
 
+  const unique = Array.from(
+    new Set((data || []).map((row) => String(row.sigungu_name || '').trim()))
+  ).filter(Boolean)
+
   return NextResponse.json({
-    data: (data || []).map((row) => row.sigungu_name),
+    data: unique.map((name) => ({
+      code: name,
+      name,
+    })),
   })
 }
