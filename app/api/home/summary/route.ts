@@ -26,6 +26,16 @@ type RegionInfo = {
   name: string
 }
 
+type TopItemInput = {
+  region_name: string
+  apartment_name: string
+  area_m2: number
+  price_krw?: number
+  top_price_krw?: number
+  complex_id?: string | null
+  count: number
+}
+
 const REGIONS: RegionInfo[] = [
   { code: '11', queryPrefix: '11', name: '서울특별시' },
   { code: '26', queryPrefix: '26', name: '부산광역시' },
@@ -116,19 +126,14 @@ function getRegionNameByLawdCode(lawdCode?: string | null) {
   return REGIONS.find((region) => region.code === regionCode)?.name || ''
 }
 
-function formatTopItem(item: {
-  region_name: string
-  apartment_name: string
-  area_m2: number
-  price_krw: number
-  complex_id?: string | null
-  count: number
-}) {
+function formatTopItem(item: TopItemInput) {
+  const price = item.price_krw ?? item.top_price_krw ?? 0
+
   return {
     region_name: item.region_name,
     apartment_name: item.apartment_name,
     pyeong: toPyeong(item.area_m2),
-    price_krw: item.price_krw,
+    price_krw: price,
     complex_id: item.complex_id || null,
     count: item.count,
   }
@@ -282,7 +287,7 @@ async function getWeekRowsFallback(latestDealDate: Date) {
   const rows: TxItem[] = []
   for (const res of responses) {
     if (res.error) throw res.error
-    rows.push(...(((res.data || []) as TxItem[])))
+    rows.push(...((res.data || []) as TxItem[]))
   }
 
   return rows.filter((item) => {

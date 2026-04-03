@@ -10,16 +10,6 @@ type PageProps = {
 const LOOKBACK_YEARS = 3
 const MAX_TRANSACTION_ROWS = 500
 
-function toNumber(value: unknown, fallback = 0) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : fallback
-}
-
-function getMinDealYear() {
-  const now = new Date()
-  return now.getFullYear() - (LOOKBACK_YEARS - 1)
-}
-
 async function getParamsId(params: PageProps['params']) {
   const resolved = await Promise.resolve(params)
   return resolved.id
@@ -53,6 +43,11 @@ function buildDescription(complex: any) {
   ].filter(Boolean)
 
   return bits.join(' · ')
+}
+
+function getMinDealYear() {
+  const now = new Date()
+  return now.getFullYear() - (LOOKBACK_YEARS - 1)
 }
 
 async function fetchComplexById(id: string) {
@@ -207,22 +202,10 @@ export default async function Page({ params }: PageProps) {
     notFound()
   }
 
-  const summary = {
-    transactionCount: safeTransactions.length,
-    minDealYear,
-    maxRows: MAX_TRANSACTION_ROWS,
-    areaCount: new Set(
-      safeTransactions
-        .map((item) => Math.round(toNumber(item.area_m2)))
-        .filter((value) => value > 0)
-    ).size,
-  }
-
   return (
     <ComplexDetailClient
       complex={complex}
       transactions={safeTransactions}
-      summary={summary}
     />
   )
 }
