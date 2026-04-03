@@ -199,7 +199,7 @@ function FancyTrendChart({ items }: { items: TrendPoint[] }) {
   }))
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="min-w-0 overflow-hidden rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold tracking-tight text-gray-900">2020년 ~ 2026년 매매거래 동향</h2>
@@ -207,8 +207,8 @@ function FancyTrendChart({ items }: { items: TrendPoint[] }) {
         </div>
       </div>
 
-      <div className="rounded-[24px] bg-gradient-to-br from-slate-50 via-white to-orange-50 p-4">
-        <div className="relative h-[340px] w-full">
+      <div className="overflow-hidden rounded-[24px] bg-gradient-to-br from-slate-50 via-white to-orange-50 p-3 sm:p-4">
+  <div className="relative h-[260px] w-full sm:h-[300px] md:h-[340px]">
           <svg viewBox={`0 0 ${width} ${height}`} className="h-full w-full">
             <defs>
               <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
@@ -446,7 +446,7 @@ export default function HomePageClient() {
   }, [regionCounts])
 
   return (
-    <main className="min-h-screen bg-[#f7f8fa] px-4 py-6 md:px-6 md:py-8">
+    <main className="min-h-screen overflow-x-hidden bg-[#f7f8fa] px-3 py-6 sm:px-4 md:px-6 md:py-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <section className="rounded-[28px] border border-gray-200 bg-white px-5 py-7 shadow-sm md:px-8">
           <div className="text-center">

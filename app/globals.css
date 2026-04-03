@@ -12,21 +12,50 @@
   --font-mono: var(--font-geist-mono);
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
+  min-width: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.88), transparent 34%),
     linear-gradient(180deg, #f7f2eb 0%, #f3ede5 100%);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+#__next {
+  min-width: 0;
+}
+
+main,
+section,
+div,
+article,
+aside,
+header,
+footer {
+  min-width: 0;
+}
+
+img,
+svg,
+canvas,
+video,
+iframe {
+  display: block;
+  max-width: 100%;
 }
 
 a {
