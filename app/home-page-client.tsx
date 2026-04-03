@@ -159,19 +159,33 @@ function useRecentSearches() {
   return { recentSearches, saveSearch }
 }
 
-function PriceText({ value, className = '', allOrange = false }: { value: number; className?: string; allOrange?: boolean }) {
+function PriceText({
+  value,
+  className = '',
+  allOrange = false,
+}: {
+  value: number
+  className?: string
+  allOrange?: boolean
+}) {
   const { amountText, suffix } = splitKoreanPrice(value)
 
   return (
     <span className={className}>
-      <span className="text-orange-500">{amountText}{suffix && allOrange ? suffix : ''}</span>
+      <span className="text-orange-500">
+        {amountText}
+        {suffix && allOrange ? suffix : ''}
+      </span>
       {suffix && !allOrange ? <span className="text-gray-900">{suffix}</span> : null}
     </span>
   )
 }
 
 function FancyTrendChart({ items }: { items: TrendPoint[] }) {
-  const fallback = [2020, 2021, 2022, 2023, 2024, 2025, 2026].map((year) => ({ year: String(year), count: 0 }))
+  const fallback = [2020, 2021, 2022, 2023, 2024, 2025, 2026].map((year) => ({
+    year: String(year),
+    count: 0,
+  }))
   const values = items.length > 0 ? items : fallback
   const max = Math.max(1, ...values.map((item) => Number(item.count || 0)))
   const width = 860
@@ -190,8 +204,12 @@ function FancyTrendChart({ items }: { items: TrendPoint[] }) {
     return { x, y, label: item.year, count: Number(item.count || 0) }
   })
 
-  const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
-  const areaPath = `${linePath} L ${points[points.length - 1]?.x ?? left} ${top + innerHeight} L ${points[0]?.x ?? left} ${top + innerHeight} Z`
+  const linePath = points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+    .join(' ')
+  const areaPath = `${linePath} L ${points[points.length - 1]?.x ?? left} ${
+    top + innerHeight
+  } L ${points[0]?.x ?? left} ${top + innerHeight} Z`
 
   const yTicks = [1, 0.75, 0.5, 0.25, 0].map((tick) => ({
     value: Math.round(max * tick),
@@ -201,14 +219,18 @@ function FancyTrendChart({ items }: { items: TrendPoint[] }) {
   return (
     <div className="min-w-0 overflow-hidden rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold tracking-tight text-gray-900">2020년 ~ 2026년 매매거래 동향</h2>
-          <p className="mt-1 text-sm text-gray-500">연도별 전국 아파트 매매 거래건수입니다.</p>
+        <div className="min-w-0">
+          <h2 className="break-keep text-lg font-bold tracking-tight text-gray-900">
+            2020년 ~ 2026년 매매거래 동향
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            연도별 전국 아파트 매매 거래건수입니다.
+          </p>
         </div>
       </div>
 
       <div className="overflow-hidden rounded-[24px] bg-gradient-to-br from-slate-50 via-white to-orange-50 p-3 sm:p-4">
-  <div className="relative h-[260px] w-full sm:h-[300px] md:h-[340px]">
+        <div className="relative h-[260px] w-full min-w-0 sm:h-[300px] md:h-[340px]">
           <svg viewBox={`0 0 ${width} ${height}`} className="h-full w-full">
             <defs>
               <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
@@ -223,31 +245,81 @@ function FancyTrendChart({ items }: { items: TrendPoint[] }) {
 
             {yTicks.map((tick) => (
               <g key={`${tick.value}-${tick.y}`}>
-                <line x1={left} x2={width - right} y1={tick.y} y2={tick.y} stroke="#e5e7eb" strokeDasharray="4 6" />
-                <text x={left - 8} y={tick.y + 4} textAnchor="end" fontSize="11" fontWeight="600" fill="#94a3b8">
+                <line
+                  x1={left}
+                  x2={width - right}
+                  y1={tick.y}
+                  y2={tick.y}
+                  stroke="#e5e7eb"
+                  strokeDasharray="4 6"
+                />
+                <text
+                  x={left - 8}
+                  y={tick.y + 4}
+                  textAnchor="end"
+                  fontSize="11"
+                  fontWeight="600"
+                  fill="#94a3b8"
+                >
                   {tick.value.toLocaleString()}
                 </text>
               </g>
             ))}
 
             <path d={areaPath} fill="url(#trendArea)" />
-            <path d={linePath} fill="none" stroke="url(#trendLine)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d={linePath}
+              fill="none"
+              stroke="url(#trendLine)"
+              strokeWidth="4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
 
             {points.map((point) => (
               <g key={point.label}>
-                <circle cx={point.x} cy={point.y} r="6" fill="#fff" stroke="#f97316" strokeWidth="3" />
-                <rect x={point.x - 34} y={point.y - 38} rx="10" ry="10" width="68" height="22" fill="#111827" opacity="0.92" />
-                <text x={point.x} y={point.y - 23} textAnchor="middle" fontSize="11" fontWeight="700" fill="#fff">
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r="6"
+                  fill="#fff"
+                  stroke="#f97316"
+                  strokeWidth="3"
+                />
+                <rect
+                  x={point.x - 34}
+                  y={point.y - 38}
+                  rx="10"
+                  ry="10"
+                  width="68"
+                  height="22"
+                  fill="#111827"
+                  opacity="0.92"
+                />
+                <text
+                  x={point.x}
+                  y={point.y - 23}
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="700"
+                  fill="#fff"
+                >
                   {point.count.toLocaleString()}
                 </text>
-                <text x={point.x} y={height - 14} textAnchor="middle" fontSize="12" fontWeight="700" fill="#6b7280">
+                <text
+                  x={point.x}
+                  y={height - 14}
+                  textAnchor="middle"
+                  fontSize="12"
+                  fontWeight="700"
+                  fill="#6b7280"
+                >
                   {point.label}
                 </text>
               </g>
             ))}
           </svg>
         </div>
-
       </div>
     </div>
   )
@@ -261,8 +333,11 @@ function TopListSection({
   items: SummaryItem[]
 }) {
   return (
-    <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-bold tracking-tight text-gray-900">{title}</h2>
+    <section className="overflow-hidden rounded-[24px] border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+      <h2 className="break-keep text-base font-bold tracking-tight text-gray-900 sm:text-lg">
+        {title}
+      </h2>
+
       <ol className="mt-4 space-y-3">
         {items.length === 0 ? (
           <li className="rounded-2xl bg-gray-50 px-4 py-4 text-sm text-gray-500">
@@ -271,29 +346,46 @@ function TopListSection({
         ) : (
           items.slice(0, 5).map((item, index) => {
             const body = (
-              <div className="flex items-start gap-3 rounded-2xl border border-gray-100 bg-gradient-to-br from-white to-gray-50 px-4 py-3 shadow-sm transition hover:border-orange-200 hover:shadow-md">
-                <span className="mt-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-gray-900 px-2 text-xs font-bold text-white">
+              <div className="flex min-w-0 items-start gap-3 overflow-hidden rounded-2xl border border-gray-100 bg-gradient-to-br from-white to-gray-50 px-4 py-3 shadow-sm transition hover:border-orange-200 hover:shadow-md">
+                <span className="mt-0.5 inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full bg-gray-900 px-2 text-xs font-bold text-white">
                   {index + 1}
                 </span>
+
                 <div className="min-w-0 flex-1 text-sm text-gray-700">
-                  <div className="leading-6">
-                    <span className="font-semibold text-gray-500">{item.region_name || '전국'}</span>{' '}
-                    <span className="font-semibold text-gray-900">{item.apartment_name}</span>{' '}
-                    <span>{item.pyeong}</span>{' '}
-                    <PriceText value={item.price_krw} allOrange className="font-semibold" />
-                    {typeof item.count === 'number' ? <span className="text-gray-500"> · {item.count}건</span> : null}
+                  <div className="break-words leading-6 text-[14px] sm:text-sm">
+                    <span className="font-semibold text-gray-500">
+                      {item.region_name || '전국'}
+                    </span>{' '}
+                    <span className="break-all font-semibold text-gray-900 sm:break-words">
+                      {item.apartment_name}
+                    </span>{' '}
+                    <span className="break-keep">{item.pyeong}</span>{' '}
+                    <PriceText
+                      value={item.price_krw}
+                      allOrange
+                      className="font-semibold"
+                    />
+                    {typeof item.count === 'number' ? (
+                      <span className="text-gray-500"> · {item.count}건</span>
+                    ) : null}
                   </div>
                 </div>
               </div>
             )
 
             if (!item.complex_id) {
-              return <li key={`${item.region_name}-${item.apartment_name}-${item.pyeong}-${index}`}>{body}</li>
+              return (
+                <li
+                  key={`${item.region_name}-${item.apartment_name}-${item.pyeong}-${index}`}
+                >
+                  {body}
+                </li>
+              )
             }
 
             return (
               <li key={`${item.complex_id}-${index}`}>
-                <Link href={`/complex/${item.complex_id}`}>
+                <Link href={`/complex/${item.complex_id}`} className="block min-w-0">
                   {body}
                 </Link>
               </li>
@@ -318,7 +410,7 @@ export default function HomePageClient() {
   const [initialized, setInitialized] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
-    const [regionCounts, setRegionCounts] = useState<RegionCount[]>([])
+  const [regionCounts, setRegionCounts] = useState<RegionCount[]>([])
   const [trend, setTrend] = useState<TrendPoint[]>([])
   const [topPriceWeek, setTopPriceWeek] = useState<SummaryItem[]>([])
   const [topVolumeWeek, setTopVolumeWeek] = useState<SummaryItem[]>([])
@@ -448,9 +540,9 @@ export default function HomePageClient() {
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f8fa] px-3 py-6 sm:px-4 md:px-6 md:py-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        <section className="rounded-[28px] border border-gray-200 bg-white px-5 py-7 shadow-sm md:px-8">
+        <section className="overflow-hidden rounded-[28px] border border-gray-200 bg-white px-4 py-6 shadow-sm sm:px-5 sm:py-7 md:px-8">
           <div className="text-center">
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900 md:text-4xl">
+            <h1 className="break-keep text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl md:text-4xl">
               아파트 실거래 정보 검색
             </h1>
             <p className="mt-3 text-sm text-gray-500 md:text-base">
@@ -467,12 +559,12 @@ export default function HomePageClient() {
                   if (e.key === 'Enter') runSearch()
                 }}
                 placeholder="단지명 / 지역명 입력"
-                className="h-14 flex-1 rounded-2xl border border-gray-200 bg-white px-5 text-base outline-none transition focus:border-gray-400"
+                className="h-14 min-w-0 flex-1 rounded-2xl border border-gray-200 bg-white px-5 text-base outline-none transition focus:border-gray-400"
               />
               <button
                 type="button"
                 onClick={() => runSearch()}
-                className="h-14 rounded-2xl bg-[#1f2937] px-6 text-sm font-semibold text-white transition hover:bg-black"
+                className="h-14 shrink-0 rounded-2xl bg-[#1f2937] px-6 text-sm font-semibold text-white transition hover:bg-black"
               >
                 검색
               </button>
@@ -516,11 +608,15 @@ export default function HomePageClient() {
           <TopListSection title="최근 일주일 전국 거래량 TOP 5" items={topVolumeWeek} />
         </section>
 
-        <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
+        <section className="overflow-hidden rounded-[24px] border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold tracking-tight text-gray-900">지역 바로가기</h2>
-              <p className="mt-1 text-sm text-gray-500">최근 5년 거래건수 기준으로 바로 이동합니다.</p>
+            <div className="min-w-0">
+              <h2 className="break-keep text-lg font-bold tracking-tight text-gray-900">
+                지역 바로가기
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                최근 5년 거래건수 기준으로 바로 이동합니다.
+              </p>
             </div>
           </div>
 
@@ -540,7 +636,11 @@ export default function HomePageClient() {
                   }`}
                 >
                   <span>{region.name}</span>
-                  <span className={`ml-1 font-semibold ${isActive ? 'text-orange-300' : 'text-orange-500'}`}>
+                  <span
+                    className={`ml-1 font-semibold ${
+                      isActive ? 'text-orange-300' : 'text-orange-500'
+                    }`}
+                  >
                     ({count.toLocaleString()})
                   </span>
                 </button>
@@ -549,10 +649,12 @@ export default function HomePageClient() {
           </div>
         </section>
 
-        <section className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm md:p-6">
+        <section className="overflow-hidden rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm md:p-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-lg font-bold tracking-tight text-gray-900">단지 리스트</h2>
+            <div className="min-w-0">
+              <h2 className="break-keep text-lg font-bold tracking-tight text-gray-900">
+                단지 리스트
+              </h2>
               <p className="mt-1 text-sm text-gray-500">
                 {selectedSidoName ? `${selectedSidoName} 기준으로 ` : ''}
                 최근 실거래 단지를 확인할 수 있습니다.
@@ -622,37 +724,43 @@ export default function HomePageClient() {
               data.map((item) => {
                 const detailHref = item.complex_id ? `/complex/${item.complex_id}` : '#'
                 const price = Number(item.price_krw || 0)
+
                 return (
                   <Link
                     key={`${item.id}-${item.complex_id || 'row'}`}
                     href={detailHref}
-                    className="group rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
+                    className="group min-w-0 overflow-hidden rounded-[24px] border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md sm:p-5"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-lg font-bold tracking-tight text-gray-900">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="break-all text-base font-bold tracking-tight text-gray-900 sm:break-words sm:text-lg">
                           {item.apartment_name || '-'}
                         </div>
-                        <div className="mt-1 text-sm text-gray-500">
+                        <div className="mt-1 break-keep text-sm text-gray-500">
                           {item.umd_name || '-'} · 준공 {item.build_year || '-'}
                         </div>
                       </div>
-                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
+
+                      <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
                         {item.area_m2 ? `${Math.round(item.area_m2 / 3.3058)}평` : '-'}
                       </span>
                     </div>
 
                     <div className="mt-5 flex items-end justify-between gap-3">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium uppercase tracking-wide text-gray-400">
                           최근 실거래가
                         </div>
-                        <div className="mt-1 text-2xl font-extrabold tracking-tight">
-                          <PriceText value={price} allOrange className="text-2xl font-extrabold tracking-tight" />
+                        <div className="mt-1 break-keep text-2xl font-extrabold tracking-tight">
+                          <PriceText
+                            value={price}
+                            allOrange
+                            className="text-2xl font-extrabold tracking-tight"
+                          />
                         </div>
                       </div>
 
-                      <div className="text-right text-sm text-gray-500">
+                      <div className="shrink-0 text-right text-sm text-gray-500">
                         <div>
                           {item.deal_year || '-'}.
                           {String(item.deal_month || '').padStart(2, '0')}.
@@ -663,10 +771,12 @@ export default function HomePageClient() {
                     </div>
 
                     <div className="mt-4 rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                      <div className="truncate">{formatRoadAddress(item)}</div>
-                      <div className="mt-1 flex items-center justify-between">
-                        <span>거래 {item.deal_count || 0}건</span>
-                        <span className="font-medium text-gray-700 group-hover:text-gray-900">상세보기 →</span>
+                      <div className="break-all sm:break-words">{formatRoadAddress(item)}</div>
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <span className="break-keep">거래 {item.deal_count || 0}건</span>
+                        <span className="shrink-0 font-medium text-gray-700 group-hover:text-gray-900">
+                          상세보기 →
+                        </span>
                       </div>
                     </div>
                   </Link>
@@ -697,7 +807,6 @@ export default function HomePageClient() {
             </button>
           </div>
         </section>
-
       </div>
     </main>
   )
