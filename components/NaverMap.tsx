@@ -140,18 +140,20 @@ export default function NaverMap({
           content: `
             <div style="
               position: relative;
-              min-width: 240px;
-              max-width: 280px;
+              width: min(280px, calc(100vw - 56px));
+              max-width: calc(100vw - 56px);
               padding: 0;
               border-radius: 18px;
               background: #ffffff;
               box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
               border: 1px solid rgba(15, 23, 42, 0.08);
               overflow: visible;
+              box-sizing: border-box;
               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans KR', sans-serif;
             ">
               <div style="
                 padding: 14px 16px 12px;
+                box-sizing: border-box;
               ">
                 <div style="
                   display: inline-flex;
@@ -174,7 +176,9 @@ export default function NaverMap({
                   font-weight: 800;
                   color: #111827;
                   line-height: 1.35;
-                  word-break: keep-all;
+                  white-space: normal;
+                  word-break: break-word;
+                  overflow-wrap: anywhere;
                 ">
                   ${escapeHtml(name || '단지 위치')}
                 </div>
@@ -184,7 +188,9 @@ export default function NaverMap({
                   font-size: 13px;
                   line-height: 1.55;
                   color: #6b7280;
-                  word-break: keep-all;
+                  white-space: normal;
+                  word-break: break-word;
+                  overflow-wrap: anywhere;
                 ">
                   ${escapeHtml(address || areaAddress || query)}
                 </div>
