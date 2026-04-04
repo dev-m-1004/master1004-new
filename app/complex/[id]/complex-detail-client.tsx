@@ -46,9 +46,9 @@ function formatKoreanPrice(value: number) {
   const eok = Math.floor(safeValue / 10000)
   const man = safeValue % 10000
 
-  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만원`
-  if (eok > 0) return `${eok}억원`
-  return `${man.toLocaleString()}만원`
+  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}`
+  if (eok > 0) return `${eok}억`
+  return `${man.toLocaleString()}`
 }
 
 function formatRoadAddress(complex: Complex) {

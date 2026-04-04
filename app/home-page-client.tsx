@@ -12,21 +12,21 @@ function splitKoreanPrice(value: number) {
 
   if (eok > 0 && man > 0) {
     return {
-      amountText: `${eok}억${man.toLocaleString()}`,
-      suffix: '만원',
+      amountText: `${eok}억 ${man.toLocaleString()}`,
+      suffix: '',
     }
   }
 
   if (eok > 0) {
     return {
       amountText: `${eok}억`,
-      suffix: '만원',
+      suffix: '',
     }
   }
 
   return {
     amountText: man.toLocaleString(),
-    suffix: '만원',
+    suffix: '',
   }
 }
 
@@ -550,54 +550,97 @@ export default function HomePageClient() {
             </p>
           </div>
 
-          <div className="mx-auto mt-6 max-w-3xl">
-            <div className="flex flex-col gap-3 md:flex-row">
-              <input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') runSearch()
-                }}
-                placeholder="단지명 / 지역명 입력"
-                className="h-14 min-w-0 flex-1 rounded-2xl border border-gray-200 bg-white px-5 text-base outline-none transition focus:border-gray-400"
-              />
-              <button
-                type="button"
-                onClick={() => runSearch()}
-                className="h-14 shrink-0 rounded-2xl bg-[#1f2937] px-6 text-sm font-semibold text-white transition hover:bg-black"
-              >
-                검색
-              </button>
-            </div>
+          <div className="mx-auto mt-6 max-w-4xl">
+            <div className="rounded-[26px] border border-gray-200 bg-gradient-to-br from-slate-50 via-white to-orange-50/50 p-3 shadow-inner sm:p-4">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="relative min-w-0 flex-1">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 sm:left-5">
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      className="h-5 w-5"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M14.1667 14.1667L17.5 17.5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                      <circle
+                        cx="8.75"
+                        cy="8.75"
+                        r="5.75"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      />
+                    </svg>
+                  </span>
 
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {SUGGESTED_KEYWORDS.map((item) => (
+                  <input
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') runSearch()
+                    }}
+                    placeholder="단지명 / 지역명 입력"
+                    className="h-12 min-w-0 w-full rounded-2xl border border-gray-200 bg-white pl-12 pr-4 text-[15px] text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-4 focus:ring-slate-100 sm:h-14 sm:pl-14 sm:pr-5 sm:text-base"
+                    aria-label="단지명 또는 지역명 검색"
+                  />
+                </div>
+
                 <button
-                  key={item}
                   type="button"
-                  onClick={() => runSearch(item)}
-                  className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-100"
+                  onClick={() => runSearch()}
+                  className="h-12 min-w-[76px] shrink-0 rounded-2xl bg-[#1f2937] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-black active:scale-[0.98] sm:h-14 sm:min-w-[96px] sm:px-6 sm:text-base"
+                  aria-label="검색"
                 >
-                  {item}
+                  검색
                 </button>
-              ))}
-            </div>
-
-            {recentSearches.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm text-gray-500">
-                <span className="font-medium text-gray-400">최근 검색어</span>
-                {recentSearches.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => runSearch(item)}
-                    className="rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-200"
-                  >
-                    {item}
-                  </button>
-                ))}
               </div>
-            )}
+
+              <div className="mt-4 rounded-2xl border border-white/70 bg-white/80 px-3 py-3 shadow-sm backdrop-blur sm:mt-5 sm:px-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="shrink-0 text-[11px] font-semibold tracking-[0.08em] text-gray-400 sm:text-xs">
+                    추천 키워드
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {SUGGESTED_KEYWORDS.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => runSearch(item)}
+                        className="rounded-full border border-gray-200 bg-white px-3 py-2 text-[12px] font-medium leading-none text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 active:scale-[0.98] sm:px-3.5 sm:py-2 sm:text-sm"
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {recentSearches.length > 0 && (
+                  <div className="mt-3 border-t border-gray-100 pt-3 sm:mt-4 sm:pt-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <div className="shrink-0 text-[11px] font-semibold tracking-[0.08em] text-gray-400 sm:text-xs">
+                        최근 검색어
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {recentSearches.map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => runSearch(item)}
+                            className="rounded-full bg-gray-100 px-3 py-2 text-[12px] font-medium leading-none text-gray-700 transition hover:bg-gray-200 active:scale-[0.98] sm:px-3.5 sm:py-2 sm:text-sm"
+                          >
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </section>
 

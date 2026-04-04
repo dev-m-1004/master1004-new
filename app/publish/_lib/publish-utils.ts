@@ -55,9 +55,9 @@ export function formatKoreanPrice(value?: number | null) {
   const eok = Math.floor(amount / 10000)
   const man = amount % 10000
 
-  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만원`
-  if (eok > 0) return `${eok}억원`
-  return `${man.toLocaleString()}만원`
+  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}`
+  if (eok > 0) return `${eok}억`
+  return `${man.toLocaleString()}`
 }
 
 export function formatPriceForTable(value?: number | null) {
@@ -67,9 +67,9 @@ export function formatPriceForTable(value?: number | null) {
   const eok = Math.floor(amount / 10000)
   const man = amount % 10000
 
-  if (eok > 0 && man > 0) return `${eok}.${String(man).padStart(4, '0')}`
-  if (eok > 0) return `${eok}.0`
-  return `0.${String(man).padStart(4, '0')}`
+  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}`
+  if (eok > 0) return `${eok}억`
+  return `${man.toLocaleString()}`
 }
 
 export function formatAreaM2(value?: number | null) {
