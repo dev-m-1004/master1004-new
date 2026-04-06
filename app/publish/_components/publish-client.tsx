@@ -11,13 +11,20 @@ import {
   formatDealDate,
   formatKoreanPrice,
   formatPyeong,
-  formatRoadAddress,
 } from '../_lib/publish-utils'
+
+type TopDealsSection = {
+  items: PublishTransactionItem[]
+  label: string
+  notice?: string
+  sourceRange?: PublishRange
+}
 
 type Props = {
   regionName: string
   range: PublishRange
   items: PublishTransactionItem[]
+  topDeals: TopDealsSection
   baseDateIso: string
   basePath: string
 }
@@ -26,6 +33,7 @@ export default function PublishClient({
   regionName,
   range,
   items,
+  topDeals,
   baseDateIso,
   basePath,
 }: Props) {
@@ -41,10 +49,11 @@ export default function PublishClient({
       regionName,
       range,
       items,
+      topDeals,
       baseDate,
       basePath,
     })
-  }, [regionName, range, items, baseDate, basePath])
+  }, [regionName, range, items, topDeals, baseDate, basePath])
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] px-4 py-5 md:px-6 md:py-8">
@@ -105,13 +114,6 @@ function buildComplexAnchor(item: PublishTransactionItem) {
   return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8;text-decoration:none;font-weight:700;">${name}</a>`
 }
 
-function getTop5ByPrice(items: PublishTransactionItem[]) {
-  return [...items]
-    .filter((item) => Number(item.price_krw || 0) > 0)
-    .sort((a, b) => Number(b.price_krw || 0) - Number(a.price_krw || 0))
-    .slice(0, 5)
-}
-
 function buildBoardLinks(regionName: string, basePath: string) {
   const links = [
     { label: `${regionName} 오늘의 실거래`, href: `${basePath}/today` },
@@ -130,27 +132,41 @@ function buildBoardLinks(regionName: string, basePath: string) {
   </div>`
 }
 
+function buildTopDealsTitleBlock(topDeals: TopDealsSection) {
+  const notice = topDeals.notice
+    ? `<p style="margin:6px 0 0 0;color:#6b7280;font-size:13px;line-height:1.6;">${escapeHtml(topDeals.notice)}</p>`
+    : ''
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:4px;margin:26px 0 12px 0;">
+      <h3 style="font-size:22px;margin:0;">${escapeHtml(topDeals.label)}</h3>
+      ${notice}
+    </div>
+  `
+}
+
 function buildBoardHtml({
   regionName,
   range,
   items,
+  topDeals,
   baseDate,
   basePath,
 }: {
   regionName: string
   range: PublishRange
   items: PublishTransactionItem[]
+  topDeals: TopDealsSection
   baseDate: Date
   basePath: string
 }) {
   const stats = buildStats(items)
   const briefings = buildBriefing(regionName, items)
-  const top5 = getTop5ByPrice(items)
   const latest = items.slice(0, 10)
 
   const top5Rows =
-    top5.length > 0
-      ? top5
+    topDeals.items.length > 0
+      ? topDeals.items
           .map(
             (item, index) => `
               <tr>
@@ -159,13 +175,14 @@ function buildBoardHtml({
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(formatAreaM2(item.area_m2))} / ${escapeHtml(formatPyeong(item.area_m2))}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(item.floor ? `${item.floor}층` : '-')}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;color:#dc2626;font-weight:700;">${escapeHtml(formatKoreanPrice(item.price_krw))}</td>
+                <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(formatDealDate(item.deal_year, item.deal_month, item.deal_day))}</td>
               </tr>
             `
           )
           .join('')
       : `
         <tr>
-          <td colspan="5" style="padding:16px;border:1px solid #e5e7eb;text-align:center;color:#6b7280;">표시할 거래가 없습니다.</td>
+          <td colspan="6" style="padding:16px;border:1px solid #e5e7eb;text-align:center;color:#6b7280;">표시할 거래가 없습니다.</td>
         </tr>
       `
 
@@ -224,7 +241,7 @@ function buildBoardHtml({
     </tbody>
   </table>
 
-  <h3 style="font-size:22px;margin:26px 0 12px 0;">매매가 TOP 5</h3>
+  ${buildTopDealsTitleBlock(topDeals)}
   <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;">
     <thead>
       <tr style="background:#111827;color:#fff;">
@@ -233,6 +250,7 @@ function buildBoardHtml({
         <th style="padding:10px;border:1px solid #e5e7eb;">면적</th>
         <th style="padding:10px;border:1px solid #e5e7eb;">층수</th>
         <th style="padding:10px;border:1px solid #e5e7eb;">매매가</th>
+        <th style="padding:10px;border:1px solid #e5e7eb;">거래일</th>
       </tr>
     </thead>
     <tbody>

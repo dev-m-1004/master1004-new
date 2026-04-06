@@ -6,6 +6,13 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+type TopDealsResult = {
+  items: PublishTransactionItem[]
+  label: string
+  notice?: string
+  sourceRange: PublishRange
+}
+
 function normalizeSidoName(input: string) {
   const value = String(input || '').trim()
 
@@ -127,6 +134,144 @@ function getLimitByRange(range: PublishRange) {
   return 3000
 }
 
+function getTopWindowStart(baseDate: Date, range: PublishRange) {
+  if (range === 'today') return getRangeStart(baseDate, 'today')
+  if (range === 'week') return getRangeStart(baseDate, 'week')
+  return getRangeStart(baseDate, 'month')
+}
+
+async function fetchTransactionsForWindow({
+  prefix,
+  rangeStart,
+  baseDate,
+  limit,
+}: {
+  prefix: string
+  rangeStart: Date
+  baseDate: Date
+  limit: number
+}) {
+  const dateFilter = buildDateFilter(rangeStart, baseDate)
+
+  let query = supabase
+    .from('transactions')
+    .select(`
+      id,
+      complex_id,
+      apartment_name,
+      price_krw,
+      area_m2,
+      floor,
+      deal_year,
+      deal_month,
+      deal_day,
+      umd_name,
+      road_name,
+      road_bonbun,
+      road_bubun,
+      lawd_code,
+      created_at
+    `)
+    .like('lawd_code', `${prefix}%`)
+
+  if (dateFilter) {
+    query = query.or(dateFilter)
+  }
+
+  const { data, error } = await query
+    .not('price_krw', 'is', null)
+    .gt('price_krw', 0)
+    .order('deal_year', { ascending: false })
+    .order('deal_month', { ascending: false })
+    .order('deal_day', { ascending: false })
+    .order('price_krw', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw new Error(error.message)
+  return (data || []) as PublishTransactionItem[]
+}
+
+function buildTopDealsMeta(requestedRange: PublishRange, sourceRange: PublishRange): Omit<TopDealsResult, 'items'> {
+  if (requestedRange === sourceRange) {
+    if (sourceRange === 'today') {
+      return {
+        label: '전일 기준 매매가 TOP 5',
+        sourceRange,
+      }
+    }
+
+    if (sourceRange === 'week') {
+      return {
+        label: '최근 7일 매매가 TOP 5',
+        sourceRange,
+      }
+    }
+
+    return {
+      label: '최근 30일 매매가 TOP 5',
+      sourceRange,
+    }
+  }
+
+  if (sourceRange === 'week') {
+    return {
+      label: '최근 7일 매매가 TOP 5',
+      notice: '전일 등록 거래가 적어 최근 7일 기준으로 상위 거래를 보여드립니다.',
+      sourceRange,
+    }
+  }
+
+  return {
+    label: '최근 30일 매매가 TOP 5',
+    notice: '전일·최근 7일 등록 거래가 적어 최근 30일 기준으로 상위 거래를 보여드립니다.',
+    sourceRange,
+  }
+}
+
+async function getTopDealsWithFallback({
+  prefix,
+  requestedRange,
+  baseDate,
+}: {
+  prefix: string
+  requestedRange: PublishRange
+  baseDate: Date
+}): Promise<TopDealsResult> {
+  const candidateRanges: PublishRange[] =
+    requestedRange === 'today'
+      ? ['today', 'week', 'month']
+      : requestedRange === 'week'
+        ? ['week', 'month']
+        : ['month']
+
+  for (const candidate of candidateRanges) {
+    const items = await fetchTransactionsForWindow({
+      prefix,
+      rangeStart: getTopWindowStart(baseDate, candidate),
+      baseDate,
+      limit: candidate === 'today' ? 80 : candidate === 'week' ? 240 : 500,
+    })
+
+    if (items.length >= 5 || candidate === candidateRanges[candidateRanges.length - 1]) {
+      const top5 = [...items]
+        .filter((item) => Number(item.price_krw || 0) > 0)
+        .sort((a, b) => Number(b.price_krw || 0) - Number(a.price_krw || 0))
+        .slice(0, 5)
+
+      return {
+        items: top5,
+        ...buildTopDealsMeta(requestedRange, candidate),
+      }
+    }
+  }
+
+  return {
+    items: [],
+    label: '매매가 TOP 5',
+    sourceRange: requestedRange,
+  }
+}
+
 export async function getPublishTransactions(params: {
   scope: 'sido' | 'sigungu'
   sido: string
@@ -149,6 +294,11 @@ export async function getPublishTransactions(params: {
   if (!prefix) {
     return {
       items: [] as PublishTransactionItem[],
+      topDeals: {
+        items: [] as PublishTransactionItem[],
+        label: '매매가 TOP 5',
+        sourceRange: range,
+      },
       regionName,
       baseDate: new Date(),
     }
@@ -180,44 +330,22 @@ export async function getPublishTransactions(params: {
       : new Date()
 
   const startDate = getRangeStart(baseDate, range)
-  const dateFilter = buildDateFilter(startDate, baseDate)
+  const items = await fetchTransactionsForWindow({
+    prefix,
+    rangeStart: startDate,
+    baseDate,
+    limit: getLimitByRange(range),
+  })
 
-  let query = supabase
-    .from('transactions')
-    .select(`
-      id,
-      complex_id,
-      apartment_name,
-      price_krw,
-      area_m2,
-      floor,
-      deal_year,
-      deal_month,
-      deal_day,
-      umd_name,
-      road_name,
-      road_bonbun,
-      road_bubun,
-      lawd_code,
-      created_at
-    `)
-    .like('lawd_code', `${prefix}%`)
-
-  if (dateFilter) {
-    query = query.or(dateFilter)
-  }
-
-  const { data, error } = await query
-    .order('deal_year', { ascending: false })
-    .order('deal_month', { ascending: false })
-    .order('deal_day', { ascending: false })
-    .order('price_krw', { ascending: false, nullsFirst: false })
-    .limit(getLimitByRange(range))
-
-  if (error) throw new Error(error.message)
+  const topDeals = await getTopDealsWithFallback({
+    prefix,
+    requestedRange: range,
+    baseDate,
+  })
 
   return {
-    items: (data || []) as PublishTransactionItem[],
+    items,
+    topDeals,
     regionName,
     baseDate,
   }

@@ -60,6 +60,7 @@ export default async function SidoPublishPage({ params }: PageProps) {
       regionName={result.regionName}
       range={range}
       items={result.items}
+      topDeals={result.topDeals}
       baseDateIso={result.baseDate.toISOString()}
       basePath={`/publish/sido/${encodeURIComponent(sido)}`}
     />
