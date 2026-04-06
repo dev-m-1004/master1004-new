@@ -111,8 +111,6 @@ export async function backfillSingleMonth({
     if (error) {
       throw error
     }
-
-    await syncComplexMappings()
   }
 
   return {

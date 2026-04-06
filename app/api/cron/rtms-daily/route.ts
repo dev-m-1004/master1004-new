@@ -125,8 +125,21 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+async function syncComplexMappings() {
+  const insertResult = await supabaseAdmin.rpc('insert_missing_complexes')
+  if (insertResult.error) {
+    throw insertResult.error
+  }
 
-    const refreshResults = await refreshAfterImport()
+  const updateResult = await supabaseAdmin.rpc(
+    'update_transaction_complex_mapping'
+  )
+  if (updateResult.error) {
+    throw updateResult.error
+  }
+}
+    await syncComplexMappings()
+const refreshResults = await refreshAfterImport()
 
     return NextResponse.json({
       ok: errors.length === 0,
