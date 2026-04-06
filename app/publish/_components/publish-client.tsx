@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useMemo } from 'react'
 import type { PublishRange, PublishTransactionItem } from '../_lib/publish-utils'
 import {
@@ -21,29 +20,6 @@ type Props = {
   items: PublishTransactionItem[]
   baseDateIso: string
   basePath: string
-}
-
-function RangeTab({
-  href,
-  active,
-  label,
-}: {
-  href: string
-  active: boolean
-  label: string
-}) {
-  return (
-    <Link
-      href={href}
-      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition sm:px-4 sm:py-2 sm:text-sm ${
-        active
-          ? 'bg-gray-900 text-white'
-          : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-      }`}
-    >
-      {label}
-    </Link>
-  )
 }
 
 export default function PublishClient({
@@ -78,27 +54,7 @@ export default function PublishClient({
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] px-4 py-5 md:px-6 md:py-8">
-      <div className="mx-auto max-w-5xl space-y-4">
-        <section className="rounded-[24px] border border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6 sm:py-5">
-          <div className="flex flex-wrap gap-2">
-            <RangeTab
-              href={`${basePath}/today`}
-              active={range === 'today'}
-              label="오늘"
-            />
-            <RangeTab
-              href={`${basePath}/week`}
-              active={range === 'week'}
-              label="최근 1주일"
-            />
-            <RangeTab
-              href={`${basePath}/month`}
-              active={range === 'month'}
-              label="최근 1개월"
-            />
-          </div>
-        </section>
-
+      <div className="mx-auto max-w-5xl">
         <section className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
           <h1
             id="board-title"

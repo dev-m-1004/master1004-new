@@ -1,175 +1,54 @@
+// (updated backfill.ts)
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { fetchMolitApartmentTrades } from './client'
 import { mapMolitItemToTransactionRow } from './mapper'
 
-export function buildYearMonthList(startYmd: string, endYmd: string) {
-  const result: string[] = []
-
-  let year = Number(startYmd.slice(0, 4))
-  let month = Number(startYmd.slice(4, 6))
-  const endYear = Number(endYmd.slice(0, 4))
-  const endMonth = Number(endYmd.slice(4, 6))
-
-  while (year < endYear || (year === endYear && month <= endMonth)) {
-    result.push(`${year}${String(month).padStart(2, '0')}`)
-    month += 1
-
-    if (month > 12) {
-      month = 1
-      year += 1
-    }
-  }
-
-  return result
+function toDateOnlyKst(date = new Date()) {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000)
+  return new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()))
 }
 
-async function createImportJob(params: {
-  jobType: 'backfill' | 'daily_sync'
-  lawdCode: string
-  dealYmd: string
-}) {
-  const { data, error } = await supabaseAdmin
-    .from('import_jobs')
-    .insert({
-      job_type: params.jobType,
-      lawd_code: params.lawdCode,
-      deal_ymd: params.dealYmd,
-      status: 'pending',
-    })
-    .select('*')
-    .single()
+function getRecent7DayWindow() {
+  const todayKst = toDateOnlyKst()
+  const end = new Date(todayKst)
+  end.setUTCDate(end.getUTCDate() - 1)
 
-  if (error) {
-    throw error
-  }
+  const start = new Date(end)
+  start.setUTCDate(start.getUTCDate() - 6)
 
-  return data
+  return { start, end }
 }
 
-async function finishImportJob(params: {
-  id: number
-  status: 'success' | 'failed'
-  fetchedCount?: number
-  insertedCount?: number
-  updatedCount?: number
-  skippedCount?: number
-  errorMessage?: string | null
-}) {
-  const { error } = await supabaseAdmin
-    .from('import_jobs')
-    .update({
-      status: params.status,
-      fetched_count: params.fetchedCount ?? 0,
-      inserted_count: params.insertedCount ?? 0,
-      updated_count: params.updatedCount ?? 0,
-      skipped_count: params.skippedCount ?? 0,
-      error_message: params.errorMessage ?? null,
-      finished_at: new Date().toISOString(),
-    })
-    .eq('id', params.id)
-
-  if (error) {
-    throw error
-  }
+function parseDealDate(row: any) {
+  return new Date(Date.UTC(row.deal_year, row.deal_month - 1, row.deal_day))
 }
 
-async function syncComplexMappings() {
-  const { error: insertComplexesError } = await supabaseAdmin.rpc(
-    'insert_missing_complexes'
+export async function backfillSingleMonth({ lawdCode, dealYmd }: any) {
+  const rawItems = await fetchMolitApartmentTrades({ lawdCode, dealYmd })
+  const mappedRows = rawItems.map((item: any) =>
+    mapMolitItemToTransactionRow(item, lawdCode)
   )
 
-  if (insertComplexesError) {
-    throw insertComplexesError
-  }
+  const { start, end } = getRecent7DayWindow()
 
-  const { error: updateMappingsError } = await supabaseAdmin.rpc(
-    'update_transaction_complex_mapping'
-  )
-
-  if (updateMappingsError) {
-    throw updateMappingsError
-  }
-}
-
-export async function backfillSingleMonth(params: {
-  lawdCode: string
-  dealYmd: string
-  dryRun?: boolean
-}) {
-  const { lawdCode, dealYmd, dryRun = false } = params
-
-  const job = await createImportJob({
-    jobType: 'backfill',
-    lawdCode,
-    dealYmd,
+  const rows = mappedRows.filter((row: any) => {
+    const dealDate = parseDealDate(row)
+    return dealDate >= start && dealDate <= end
   })
 
-  try {
-    const rawItems = await fetchMolitApartmentTrades({ lawdCode, dealYmd })
-    const rows = rawItems.map((item) =>
-      mapMolitItemToTransactionRow(item, lawdCode)
-    )
-
-    if (dryRun) {
-      await finishImportJob({
-        id: job.id,
-        status: 'success',
-        fetchedCount: rows.length,
-        insertedCount: 0,
-        updatedCount: 0,
-        skippedCount: rows.length,
-      })
-
-      return {
-        lawdCode,
-        dealYmd,
-        fetchedCount: rows.length,
-        insertedCount: 0,
-        updatedCount: 0,
-        skippedCount: rows.length,
-        dryRun: true,
-      }
-    }
-
+  if (rows.length > 0) {
     const { error } = await supabaseAdmin
       .from('transactions')
       .upsert(rows, {
         onConflict:
           'lawd_code,apartment_name,deal_year,deal_month,deal_day,area_m2,floor,price_krw',
-        ignoreDuplicates: true,
       })
 
-    if (error) {
-      throw error
-    }
+    if (error) throw error
+  }
 
-    await syncComplexMappings()
-
-    await finishImportJob({
-      id: job.id,
-      status: 'success',
-      fetchedCount: rows.length,
-      insertedCount: rows.length,
-      updatedCount: 0,
-      skippedCount: 0,
-    })
-
-    return {
-      lawdCode,
-      dealYmd,
-      fetchedCount: rows.length,
-      insertedCount: rows.length,
-      updatedCount: 0,
-      skippedCount: 0,
-      dryRun: false,
-    }
-  } catch (error: any) {
-    await finishImportJob({
-      id: job.id,
-      status: 'failed',
-      errorMessage: error?.message || 'unknown error',
-    })
-
-    throw error
+  return {
+    fetched: mappedRows.length,
+    filtered: rows.length,
   }
 }
