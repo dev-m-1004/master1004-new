@@ -37,17 +37,11 @@ export default function PublishClient({
   )
 
   const boardHtml = useMemo(() => {
-    const origin =
-      typeof window !== 'undefined'
-        ? window.location.origin
-        : 'http://localhost:3000'
-
     return buildBoardHtml({
       regionName,
       range,
       items,
       baseDate,
-      siteOrigin: origin,
       basePath,
     })
   }, [regionName, range, items, baseDate, basePath])
@@ -103,11 +97,11 @@ function getRangeIntro(range: PublishRange, regionName: string, baseDate: Date) 
   return `${dateText} 기준 ${regionName}의 최근 30일 등록 아파트 매매 실거래 현황입니다.`
 }
 
-function buildComplexAnchor(item: PublishTransactionItem, siteOrigin: string) {
+function buildComplexAnchor(item: PublishTransactionItem) {
   const name = escapeHtml(String(item.apartment_name || '-'))
   if (!item.complex_id) return `<span>${name}</span>`
 
-  const href = `${siteOrigin}/complex/${encodeURIComponent(String(item.complex_id))}`
+  const href = `/complex/${encodeURIComponent(String(item.complex_id))}`
   return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8;text-decoration:none;font-weight:700;">${name}</a>`
 }
 
@@ -118,11 +112,11 @@ function getTop5ByPrice(items: PublishTransactionItem[]) {
     .slice(0, 5)
 }
 
-function buildBoardLinks(regionName: string, siteOrigin: string, basePath: string) {
+function buildBoardLinks(regionName: string, basePath: string) {
   const links = [
-    { label: `${regionName} 오늘의 실거래`, href: `${siteOrigin}${basePath}/today` },
-    { label: `${regionName} 최근 일주일 실거래`, href: `${siteOrigin}${basePath}/week` },
-    { label: `${regionName} 최근 1개월 실거래`, href: `${siteOrigin}${basePath}/month` },
+    { label: `${regionName} 오늘의 실거래`, href: `${basePath}/today` },
+    { label: `${regionName} 최근 일주일 실거래`, href: `${basePath}/week` },
+    { label: `${regionName} 최근 1개월 실거래`, href: `${basePath}/month` },
   ]
 
   return `
@@ -141,14 +135,12 @@ function buildBoardHtml({
   range,
   items,
   baseDate,
-  siteOrigin,
   basePath,
 }: {
   regionName: string
   range: PublishRange
   items: PublishTransactionItem[]
   baseDate: Date
-  siteOrigin: string
   basePath: string
 }) {
   const stats = buildStats(items)
@@ -163,7 +155,7 @@ function buildBoardHtml({
             (item, index) => `
               <tr>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${index + 1}</td>
-                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item, siteOrigin)}</td>
+                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item)}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(formatAreaM2(item.area_m2))} / ${escapeHtml(formatPyeong(item.area_m2))}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(item.floor ? `${item.floor}층` : '-')}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;color:#dc2626;font-weight:700;">${escapeHtml(formatKoreanPrice(item.price_krw))}</td>
@@ -183,7 +175,7 @@ function buildBoardHtml({
           .map(
             (item) => `
               <tr>
-                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item, siteOrigin)}</td>
+                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item)}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(formatAreaM2(item.area_m2))}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(item.floor ? `${item.floor}층` : '-')}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;color:#dc2626;font-weight:700;">${escapeHtml(formatKoreanPrice(item.price_krw))}</td>
@@ -248,7 +240,7 @@ function buildBoardHtml({
     </tbody>
   </table>
 
-  ${buildBoardLinks(regionName, siteOrigin, basePath)}
+  ${buildBoardLinks(regionName, basePath)}
 
   <div style="border:1px solid #e5e7eb;background:#fafafa;border-radius:14px;padding:16px 18px;">
     <div style="font-weight:800;margin-bottom:10px;">핵심 요약</div>

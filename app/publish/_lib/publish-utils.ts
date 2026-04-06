@@ -279,19 +279,19 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#39;')
 }
 
-function buildComplexAnchor(item: PublishTransactionItem, siteOrigin: string) {
+function buildComplexAnchor(item: PublishTransactionItem) {
   const name = escapeHtml(String(item.apartment_name || '-'))
   if (!item.complex_id) return `<span>${name}</span>`
 
-  const href = `${siteOrigin}/complex/${encodeURIComponent(String(item.complex_id))}`
+  const href = `/complex/${encodeURIComponent(String(item.complex_id))}`
   return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8;text-decoration:none;font-weight:700;">${name}</a>`
 }
 
-function buildPublishLinks(regionName: string, siteOrigin: string, basePath: string) {
+function buildPublishLinks(regionName: string, basePath: string) {
   const links = [
-    { label: `${regionName} 오늘의 실거래`, href: `${siteOrigin}${basePath}/today` },
-    { label: `${regionName} 최근 일주일 실거래`, href: `${siteOrigin}${basePath}/week` },
-    { label: `${regionName} 최근 1개월 실거래`, href: `${siteOrigin}${basePath}/month` },
+    { label: `${regionName} 오늘의 실거래`, href: `${basePath}/today` },
+    { label: `${regionName} 최근 일주일 실거래`, href: `${basePath}/week` },
+    { label: `${regionName} 최근 1개월 실거래`, href: `${basePath}/month` },
   ]
 
   return `
@@ -310,10 +310,9 @@ export function buildPublishHtml(params: {
   range: PublishRange
   items: PublishTransactionItem[]
   baseDate: Date
-  siteOrigin: string
   basePath: string
 }) {
-  const { regionName, range, items, baseDate, siteOrigin, basePath } = params
+  const { regionName, range, items, baseDate, basePath } = params
   const title = escapeHtml(buildPublishTitle(regionName, range, items))
   const intro = escapeHtml(
     range === 'today'
@@ -335,7 +334,7 @@ export function buildPublishHtml(params: {
             (item, index) => `
               <tr>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${index + 1}</td>
-                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item, siteOrigin)}</td>
+                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item)}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(formatAreaM2(item.area_m2))} / ${escapeHtml(formatPyeong(item.area_m2))}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(item.floor ? `${item.floor}층` : '-')}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;color:#dc2626;font-weight:700;">${escapeHtml(formatKoreanPrice(item.price_krw))}</td>
@@ -355,7 +354,7 @@ export function buildPublishHtml(params: {
           .map(
             (item) => `
               <tr>
-                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item, siteOrigin)}</td>
+                <td style="padding:10px;border:1px solid #e5e7eb;">${buildComplexAnchor(item)}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(formatAreaM2(item.area_m2))}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;">${escapeHtml(item.floor ? `${item.floor}층` : '-')}</td>
                 <td style="padding:10px;border:1px solid #e5e7eb;text-align:center;color:#dc2626;font-weight:700;">${escapeHtml(formatKoreanPrice(item.price_krw))}</td>
@@ -429,7 +428,7 @@ export function buildPublishHtml(params: {
     </tbody>
   </table>
 
-  ${buildPublishLinks(regionName, siteOrigin, basePath)}
+  ${buildPublishLinks(regionName, basePath)}
 
   <div style="border:1px solid #e5e7eb;background:#fafafa;border-radius:14px;padding:16px 18px;">
     <div style="font-weight:800;margin-bottom:10px;">핵심 요약</div>
