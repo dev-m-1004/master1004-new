@@ -6,8 +6,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const REGISTERED_AT_COLUMN = 'created_at'
-
 function normalizeSidoName(input: string) {
   const value = String(input || '').trim()
 
@@ -101,6 +99,34 @@ function getRangeStart(baseDate: Date, range: PublishRange) {
   return startOfDay(subtractDays(baseStart, 29))
 }
 
+function makeDateParts(date: Date) {
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+  }
+}
+
+function buildDateFilter(rangeStart: Date, baseDate: Date) {
+  const clauses: string[] = []
+  const cursor = startOfDay(rangeStart)
+  const end = startOfDay(baseDate)
+
+  while (cursor.getTime() <= end.getTime()) {
+    const { year, month, day } = makeDateParts(cursor)
+    clauses.push(`and(deal_year.eq.${year},deal_month.eq.${month},deal_day.eq.${day})`)
+    cursor.setDate(cursor.getDate() + 1)
+  }
+
+  return clauses.join(',')
+}
+
+function getLimitByRange(range: PublishRange) {
+  if (range === 'today') return 300
+  if (range === 'week') return 1000
+  return 3000
+}
+
 export async function getPublishTransactions(params: {
   scope: 'sido' | 'sigungu'
   sido: string
@@ -130,22 +156,35 @@ export async function getPublishTransactions(params: {
 
   const { data: latestRow, error: latestError } = await supabase
     .from('transactions')
-    .select(REGISTERED_AT_COLUMN)
+    .select('deal_year, deal_month, deal_day')
     .like('lawd_code', `${prefix}%`)
-    .not(REGISTERED_AT_COLUMN, 'is', null)
-    .order(REGISTERED_AT_COLUMN, { ascending: false })
+    .not('deal_year', 'is', null)
+    .not('deal_month', 'is', null)
+    .not('deal_day', 'is', null)
+    .order('deal_year', { ascending: false })
+    .order('deal_month', { ascending: false })
+    .order('deal_day', { ascending: false })
+    .order('price_krw', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle()
 
   if (latestError) throw new Error(latestError.message)
 
-  const baseDate = latestRow?.[REGISTERED_AT_COLUMN]
-    ? new Date(latestRow[REGISTERED_AT_COLUMN])
-    : new Date()
+  const baseDate =
+    latestRow?.deal_year && latestRow?.deal_month && latestRow?.deal_day
+      ? new Date(
+          Number(latestRow.deal_year),
+          Number(latestRow.deal_month) - 1,
+          Number(latestRow.deal_day)
+        )
+      : new Date()
 
   const startDate = getRangeStart(baseDate, range)
+  const dateFilter = buildDateFilter(startDate, baseDate)
 
-  let query = supabase.from('transactions').select(`
+  let query = supabase
+    .from('transactions')
+    .select(`
       id,
       complex_id,
       apartment_name,
@@ -160,21 +199,20 @@ export async function getPublishTransactions(params: {
       road_bonbun,
       road_bubun,
       lawd_code,
-      ${REGISTERED_AT_COLUMN}
+      created_at
     `)
-
-  query = query
     .like('lawd_code', `${prefix}%`)
-    .gte(REGISTERED_AT_COLUMN, startDate.toISOString())
-    .lte(REGISTERED_AT_COLUMN, baseDate.toISOString())
+
+  if (dateFilter) {
+    query = query.or(dateFilter)
+  }
 
   const { data, error } = await query
-    .order(REGISTERED_AT_COLUMN, { ascending: false })
     .order('deal_year', { ascending: false })
     .order('deal_month', { ascending: false })
     .order('deal_day', { ascending: false })
     .order('price_krw', { ascending: false, nullsFirst: false })
-    .limit(120)
+    .limit(getLimitByRange(range))
 
   if (error) throw new Error(error.message)
 
