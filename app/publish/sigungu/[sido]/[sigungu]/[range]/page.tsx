@@ -65,6 +65,7 @@ export default async function SigunguPublishPage({ params }: PageProps) {
       regionName={result.regionName}
       range={range}
       items={result.items}
+      topDeals={result.topDeals}
       baseDateIso={result.baseDate.toISOString()}
       basePath={`/publish/sigungu/${encodeURIComponent(sido)}/${encodeURIComponent(sigungu)}`}
     />
