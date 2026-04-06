@@ -45,7 +45,7 @@ const REGIONS: RegionInfo[] = [
   { code: '31', queryPrefix: '31', name: '울산광역시' },
   { code: '36', queryPrefix: '36110', name: '세종특별자치시' },
   { code: '41', queryPrefix: '41', name: '경기도' },
-  { code: '51', queryPrefix: '51', name: '강원특별자치도' },
+  { code: '51', queryPrefix: '42', name: '강원특별자치도' },
   { code: '43', queryPrefix: '43', name: '충청북도' },
   { code: '44', queryPrefix: '44', name: '충청남도' },
   { code: '45', queryPrefix: '52', name: '전북특별자치도' },
@@ -56,7 +56,8 @@ const REGIONS: RegionInfo[] = [
 ]
 
 const TREND_YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
-const SUMMARY_CACHE_HEADER = 'public, max-age=60, s-maxage=120, stale-while-revalidate=300'
+const SUMMARY_CACHE_HEADER =
+  'public, max-age=60, s-maxage=120, stale-while-revalidate=300'
 
 function jsonOk(body: any) {
   return NextResponse.json(body, {
@@ -213,24 +214,39 @@ function aggregateWeekGroups(items: TxItem[]) {
   return Array.from(map.values())
 }
 
+async function buildRegionCounts() {
+  const counts = await Promise.all(
+    REGIONS.map(async (region) => {
+      const { count, error } = await supabase
+        .from('transactions')
+        .select('*', { count: 'exact', head: true })
+        .like('lawd_code', `${region.queryPrefix}%`)
+
+      if (error) throw error
+
+      return {
+        code: region.code,
+        name: region.name,
+        count: count || 0,
+      }
+    })
+  )
+
+  return counts
+}
+
 async function buildSummary() {
   const latestDealDate = await getLatestDealDate()
-  const recentFiveYearsBase = latestDealDate.getFullYear() - 4
   const startWeekDate = subtractDays(latestDealDate, 6)
 
-  const [trendRowsRes, regionRowsRes, weekRowsRes] = await Promise.all([
+  const [trendRowsRes, weekRowsRes, regionCounts] = await Promise.all([
     supabase
       .from('transactions')
       .select('deal_year')
       .gte('deal_year', 2020)
       .lte('deal_year', 2026)
       .limit(200000),
-    supabase
-      .from('transactions')
-      .select('deal_year, lawd_code')
-      .gte('deal_year', recentFiveYearsBase)
-      .not('lawd_code', 'is', null)
-      .limit(200000),
+
     supabase
       .from('transactions')
       .select(
@@ -244,10 +260,11 @@ async function buildSummary() {
       .order('deal_day', { ascending: false })
       .order('price_krw', { ascending: false, nullsFirst: false })
       .limit(50000),
+
+    buildRegionCounts(),
   ])
 
   if (trendRowsRes.error) throw trendRowsRes.error
-  if (regionRowsRes.error) throw regionRowsRes.error
   if (weekRowsRes.error) throw weekRowsRes.error
 
   const trendCountMap = new Map<number, number>()
@@ -263,21 +280,6 @@ async function buildSummary() {
   const trend = TREND_YEARS.map((year) => ({
     year: String(year),
     count: trendCountMap.get(year) || 0,
-  }))
-
-  const regionCountMap = new Map<string, number>()
-  for (const region of REGIONS) regionCountMap.set(region.code, 0)
-
-  for (const row of regionRowsRes.data || []) {
-    const regionCode = getRegionCodeByLawdCode((row as any).lawd_code)
-    if (!regionCode) continue
-    regionCountMap.set(regionCode, (regionCountMap.get(regionCode) || 0) + 1)
-  }
-
-  const regionCounts = REGIONS.map((region) => ({
-    code: region.code,
-    name: region.name,
-    count: regionCountMap.get(region.code) || 0,
   }))
 
   const weekRows = ((weekRowsRes.data || []) as TxItem[]).filter((item) => {
