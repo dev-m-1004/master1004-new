@@ -20,6 +20,26 @@ function getTargetMonths() {
   return Array.from(new Set([format(current), format(previous)]))
 }
 
+function getLawdCodesByGroup(req: NextRequest) {
+  const url = new URL(req.url)
+  const group = url.searchParams.get('group') || '1'
+  const envKey = `RTMS_LAWD_CODES_GROUP_${group}`
+  const raw = process.env[envKey]
+
+  if (!raw) {
+    throw new Error(`${envKey} is missing`)
+  }
+
+  return {
+    group,
+    envKey,
+    lawdCodes: raw
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean),
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     if (!process.env.CRON_SECRET) {
@@ -38,13 +58,6 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    if (!process.env.RTMS_LAWD_CODES) {
-      return NextResponse.json(
-        { ok: false, error: 'RTMS_LAWD_CODES is missing' },
-        { status: 500 }
-      )
-    }
-
     if (!process.env.MOLIT_API_KEY) {
       return NextResponse.json(
         { ok: false, error: 'MOLIT_API_KEY is missing' },
@@ -59,14 +72,11 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const lawdCodes = process.env.RTMS_LAWD_CODES
-      .split(',')
-      .map((v) => v.trim())
-      .filter(Boolean)
+    const { group, envKey, lawdCodes } = getLawdCodesByGroup(req)
 
     if (lawdCodes.length === 0) {
       return NextResponse.json(
-        { ok: false, error: 'RTMS_LAWD_CODES is empty' },
+        { ok: false, error: `${envKey} is empty` },
         { status: 500 }
       )
     }
@@ -89,9 +99,10 @@ export async function GET(req: NextRequest) {
             ...r,
           })
         } catch (error: any) {
-          console.error('backfill error', { lawd, dealYmd: m, error })
+          console.error('backfill error', { group, lawd, dealYmd: m, error })
 
           errors.push({
+            group,
             lawd,
             dealYmd: m,
             ok: false,
@@ -101,15 +112,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const refreshResults = { skipped: true }
-
     return NextResponse.json({
       ok: errors.length === 0,
+      group,
+      envKey,
       months,
       lawdCodeCount: lawdCodes.length,
       result,
       errors,
-      refreshResults,
+      refreshResults: { skipped: true },
     })
   } catch (error: any) {
     console.error('rtms-daily route error', error)
