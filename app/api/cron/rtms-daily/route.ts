@@ -109,11 +109,10 @@ export async function GET(req: NextRequest) {
           })
 
           result.push({
-            lawd,
-            dealYmd: m,
-            ok: true,
-            ...r,
-          })
+  lawd,
+  ok: true,
+  ...r,
+})
         } catch (error: any) {
           console.error('backfill error', { lawd, dealYmd: m, error })
 
