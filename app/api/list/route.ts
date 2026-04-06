@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
 const PAGE_SIZE_DEFAULT = 30
-const PAGE_SIZE_MAX = 100
-const FETCH_LIMIT = 4000
+const PAGE_SIZE_MAX = 60
+const FETCH_LIMIT_DEFAULT = 500
 
 function toPositiveInt(value: string | null, fallback: number) {
   const parsed = Number(value)
@@ -33,10 +28,8 @@ function resolvePrefixes({
   if (sigunguCode) return [sigunguCode]
   if (!sidoCode) return []
 
-  // 전북특별자치도 보정
-  if (sidoCode === '45') {
-    return ['52']
-  }
+  if (sidoCode === '45') return ['52'] // 전북특별자치도 보정
+  if (sidoCode === '51') return ['42'] // 강원특별자치도 보정
 
   return [sidoCode]
 }
@@ -65,6 +58,17 @@ function getGroupKey(row: any) {
   ].join('__')
 }
 
+function buildRoadAddress(row: any) {
+  const road = String(row.road_name || '').trim()
+  const bon = String(row.road_bonbun || '').trim()
+  const bub = String(row.road_bubun || '').trim()
+
+  if (!road) return ''
+  if (!bon && !bub) return road
+  if (bub && bub !== '0') return `${road} ${bon}-${bub}`
+  return `${road} ${bon}`
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
@@ -77,14 +81,16 @@ export async function GET(req: NextRequest) {
     const sort = (searchParams.get('sort') || 'latest').trim()
 
     const page = toPositiveInt(searchParams.get('page'), 1)
-    const requestedPageSize = toPositiveInt(
-      searchParams.get('pageSize'),
-      PAGE_SIZE_DEFAULT
-    )
-
+    const requestedPageSize = toPositiveInt(searchParams.get('pageSize'), PAGE_SIZE_DEFAULT)
     const pageSize = Math.min(requestedPageSize, PAGE_SIZE_MAX)
 
-    let query = supabase
+    const prefixes = resolvePrefixes({
+      sidoCode: sidoCodeRaw,
+      sigunguCode,
+      lawdCode,
+    })
+
+    let query = supabaseAdmin
       .from('transactions')
       .select(`
         id,
@@ -108,14 +114,7 @@ export async function GET(req: NextRequest) {
       .order('deal_year', { ascending: false })
       .order('deal_month', { ascending: false })
       .order('deal_day', { ascending: false })
-      .order('price_krw', { ascending: false, nullsFirst: false })
-      .limit(FETCH_LIMIT)
-
-    const prefixes = resolvePrefixes({
-      sidoCode: sidoCodeRaw,
-      sigunguCode,
-      lawdCode,
-    })
+      .limit(FETCH_LIMIT_DEFAULT)
 
     if (prefixes.length === 1) {
       query = query.like('lawd_code', `${prefixes[0]}%`)
@@ -132,8 +131,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await query
 
     if (error) {
-      console.error('transactions list query error:', error)
-
+      console.error('api/list query error:', error)
       return NextResponse.json(
         {
           ok: false,
@@ -155,6 +153,9 @@ export async function GET(req: NextRequest) {
     for (const row of data || []) {
       const key = getGroupKey(row)
       const current = grouped.get(key)
+      const rowCreatedAt = getCreatedAtValue(row)
+      const rowDateKey = getDateKey(row)
+      const rowPrice = Number(row.price_krw || 0)
 
       if (!current) {
         grouped.set(key, {
@@ -170,40 +171,31 @@ export async function GET(req: NextRequest) {
           lawd_code: row.lawd_code,
           dong: row.umd_name,
           umd_name: row.umd_name,
-          road_name: row.road_name,
-          road_bonbun: row.road_bonbun,
-          road_bubun: row.road_bubun,
+          road_name: buildRoadAddress(row),
           build_year: row.build_year,
           deal_count: 1,
-          max_price_krw: Number(row.price_krw || 0),
-          min_price_krw: Number(row.price_krw || 0),
-          _created_at: getCreatedAtValue(row),
-          _date_key: getDateKey(row),
+          _created_at: rowCreatedAt,
+          _date_key: rowDateKey,
+          _max_price: rowPrice,
+          _min_price: rowPrice,
         })
         continue
       }
 
       current.deal_count += 1
-      current.max_price_krw = Math.max(
-        Number(current.max_price_krw || 0),
-        Number(row.price_krw || 0)
-      )
-      current.min_price_krw =
-        current.min_price_krw === 0
-          ? Number(row.price_krw || 0)
-          : Math.min(Number(current.min_price_krw || 0), Number(row.price_krw || 0))
-
-      const rowCreatedAt = getCreatedAtValue(row)
-      const rowDateKey = getDateKey(row)
-      const currentCreatedAt = Number(current._created_at || 0)
-      const currentDateKey = Number(current._date_key || 0)
+      current._max_price = Math.max(Number(current._max_price || 0), rowPrice)
+      current._min_price =
+        current._min_price === 0
+          ? rowPrice
+          : Math.min(Number(current._min_price || 0), rowPrice)
 
       const shouldReplaceLatest =
-        rowCreatedAt > currentCreatedAt ||
-        (rowCreatedAt === currentCreatedAt && rowDateKey > currentDateKey) ||
-        (rowCreatedAt === currentCreatedAt &&
-          rowDateKey === currentDateKey &&
-          Number(row.price_krw || 0) > Number(current.price_krw || 0))
+        rowCreatedAt > Number(current._created_at || 0) ||
+        (rowCreatedAt === Number(current._created_at || 0) &&
+          rowDateKey > Number(current._date_key || 0)) ||
+        (rowCreatedAt === Number(current._created_at || 0) &&
+          rowDateKey === Number(current._date_key || 0) &&
+          rowPrice > Number(current.price_krw || 0))
 
       if (shouldReplaceLatest) {
         current.id = row.complex_id || row.id
@@ -218,9 +210,7 @@ export async function GET(req: NextRequest) {
         current.lawd_code = row.lawd_code
         current.dong = row.umd_name
         current.umd_name = row.umd_name
-        current.road_name = row.road_name
-        current.road_bonbun = row.road_bonbun
-        current.road_bubun = row.road_bubun
+        current.road_name = buildRoadAddress(row)
         current.build_year = row.build_year
         current._created_at = rowCreatedAt
         current._date_key = rowDateKey
@@ -230,25 +220,9 @@ export async function GET(req: NextRequest) {
     let items = Array.from(grouped.values())
 
     if (sort === 'price_desc') {
-      items.sort((a, b) => {
-        if (Number(b.price_krw || 0) !== Number(a.price_krw || 0)) {
-          return Number(b.price_krw || 0) - Number(a.price_krw || 0)
-        }
-        if (Number(b._date_key || 0) !== Number(a._date_key || 0)) {
-          return Number(b._date_key || 0) - Number(a._date_key || 0)
-        }
-        return Number(b._created_at || 0) - Number(a._created_at || 0)
-      })
+      items.sort((a, b) => Number(b.price_krw || 0) - Number(a.price_krw || 0))
     } else if (sort === 'price_asc') {
-      items.sort((a, b) => {
-        if (Number(a.price_krw || 0) !== Number(b.price_krw || 0)) {
-          return Number(a.price_krw || 0) - Number(b.price_krw || 0)
-        }
-        if (Number(b._date_key || 0) !== Number(a._date_key || 0)) {
-          return Number(b._date_key || 0) - Number(a._date_key || 0)
-        }
-        return Number(b._created_at || 0) - Number(a._created_at || 0)
-      })
+      items.sort((a, b) => Number(a.price_krw || 0) - Number(b.price_krw || 0))
     } else {
       items.sort((a, b) => {
         if (Number(b._created_at || 0) !== Number(a._created_at || 0)) {
@@ -264,7 +238,10 @@ export async function GET(req: NextRequest) {
     const total = items.length
     const from = (page - 1) * pageSize
     const to = from + pageSize
-    const paged = items.slice(from, to).map(({ _created_at, _date_key, ...rest }) => rest)
+
+    const paged = items.slice(from, to).map(
+      ({ _created_at, _date_key, _max_price, _min_price, ...rest }) => rest
+    )
 
     return NextResponse.json({
       ok: true,
