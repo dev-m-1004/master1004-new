@@ -75,6 +75,7 @@ type ListApiResponse = {
   pagination?: {
     page: number
     pageSize: number
+    total?: number
     hasMore: boolean
   }
   error?: string
@@ -102,7 +103,8 @@ type TrendPoint = {
 
 type SummaryResponse = {
   ok?: boolean
-  latestDealDate?: string
+  message?: string
+  latestDealDate?: string | null
   regionCounts?: RegionCount[]
   trend?: TrendPoint[]
   topPriceWeek?: SummaryItem[]
@@ -415,6 +417,7 @@ export default function HomePageClient() {
   const [topPriceWeek, setTopPriceWeek] = useState<SummaryItem[]>([])
   const [topVolumeWeek, setTopVolumeWeek] = useState<SummaryItem[]>([])
   const [summaryLoading, setSummaryLoading] = useState(true)
+  const [summaryError, setSummaryError] = useState('')
 
   const abortRef = useRef<AbortController | null>(null)
   const { recentSearches, saveSearch } = useRecentSearches()
@@ -467,20 +470,26 @@ export default function HomePageClient() {
   async function fetchSummary() {
     try {
       setSummaryLoading(true)
+      setSummaryError('')
 
-      const res = await fetch('/api/home/summary')
+      const res = await fetch('/api/home/summary', { cache: 'no-store' })
       const json: SummaryResponse = await res.json()
+
+      if (!res.ok || json.ok === false) {
+        throw new Error(json.message || '메인 요약 조회 실패')
+      }
 
       setRegionCounts(json.regionCounts || [])
       setTrend(json.trend || [])
       setTopPriceWeek(json.topPriceWeek || [])
       setTopVolumeWeek(json.topVolumeWeek || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error('메인 요약 조회 실패', error)
       setRegionCounts([])
       setTrend([])
       setTopPriceWeek([])
       setTopVolumeWeek([])
+      setSummaryError(error?.message || '메인 요약 조회 실패')
     } finally {
       setSummaryLoading(false)
     }
@@ -644,6 +653,12 @@ export default function HomePageClient() {
           </div>
         </section>
 
+        {summaryError ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {summaryError}
+          </div>
+        ) : null}
+
         <FancyTrendChart items={trend} />
 
         <section className="grid gap-6 lg:grid-cols-2">
@@ -659,6 +674,7 @@ export default function HomePageClient() {
               </h2>
               <p className="mt-1 text-sm text-gray-500">
                 최근 5년 거래건수 기준으로 바로 이동합니다.
+                {summaryLoading ? ' 집계 데이터 불러오는 중…' : ''}
               </p>
             </div>
           </div>
@@ -765,15 +781,9 @@ export default function HomePageClient() {
               </div>
             ) : (
               data.map((item) => {
-                const detailHref = item.complex_id ? `/complex/${item.complex_id}` : '#'
                 const price = Number(item.price_krw || 0)
-
-                return (
-                  <Link
-                    key={`${item.id}-${item.complex_id || 'row'}`}
-                    href={detailHref}
-                    className="group min-w-0 overflow-hidden rounded-[24px] border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md sm:p-5"
-                  >
+                const card = (
+                  <div className="group min-w-0 overflow-hidden rounded-[24px] border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md sm:p-5">
                     <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="break-all text-base font-bold tracking-tight text-gray-900 sm:break-words sm:text-lg">
@@ -822,6 +832,20 @@ export default function HomePageClient() {
                         </span>
                       </div>
                     </div>
+                  </div>
+                )
+
+                if (!item.complex_id) {
+                  return <div key={`${item.id}-no-link`}>{card}</div>
+                }
+
+                return (
+                  <Link
+                    key={`${item.id}-${item.complex_id}`}
+                    href={`/complex/${item.complex_id}`}
+                    className="block"
+                  >
+                    {card}
                   </Link>
                 )
               })

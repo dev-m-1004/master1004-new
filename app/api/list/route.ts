@@ -3,7 +3,6 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 
 const PAGE_SIZE_DEFAULT = 30
 const PAGE_SIZE_MAX = 60
-const RECENT_FETCH_LIMIT = 200
 
 function toPositiveInt(value: string | null, fallback: number) {
   const parsed = Number(value)
@@ -29,44 +28,36 @@ function resolvePrefixes({
   if (!sidoCode) return []
 
   if (sidoCode === '45') return ['52'] // 전북특별자치도
-  if (sidoCode === '51') return ['42'] // 강원특별자치도
+  if (sidoCode === '51') return ['42', '51'] // 강원도 / 강원특별자치도 혼재 대응
 
   return [sidoCode]
 }
 
-function getGroupKey(row: any) {
-  const complexId = row.complex_id ? String(row.complex_id) : ''
-  if (complexId) return `complex:${complexId}`
+function applySort(query: any, sort: string) {
+  if (sort === 'price_desc') {
+    return query
+      .order('latest_price_krw', { ascending: false, nullsFirst: false })
+      .order('latest_deal_year', { ascending: false, nullsFirst: false })
+      .order('latest_deal_month', { ascending: false, nullsFirst: false })
+      .order('latest_deal_day', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+  }
 
-  return [
-    String(row.lawd_code || '').trim(),
-    String(row.apartment_name || '').trim(),
-    String(row.umd_name || '').trim(),
-    String(row.road_name || '').trim(),
-  ].join('__')
-}
+  if (sort === 'price_asc') {
+    return query
+      .order('latest_price_krw', { ascending: true, nullsFirst: false })
+      .order('latest_deal_year', { ascending: false, nullsFirst: false })
+      .order('latest_deal_month', { ascending: false, nullsFirst: false })
+      .order('latest_deal_day', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+  }
 
-function getDateValue(row: any) {
-  const y = Number(row.deal_year || 0)
-  const m = Number(row.deal_month || 0)
-  const d = Number(row.deal_day || 0)
-  return y * 10000 + m * 100 + d
-}
-
-function getCreatedAtValue(row: any) {
-  const value = row.created_at ? new Date(row.created_at).getTime() : 0
-  return Number.isFinite(value) ? value : 0
-}
-
-function buildRoadAddress(row: any) {
-  const road = String(row.road_name || '').trim()
-  const bon = String(row.road_bonbun || '').trim()
-  const bub = String(row.road_bubun || '').trim()
-
-  if (!road) return ''
-  if (!bon && !bub) return road
-  if (bub && bub !== '0') return `${road} ${bon}-${bub}`
-  return `${road} ${bon}`
+  return query
+    .order('latest_deal_year', { ascending: false, nullsFirst: false })
+    .order('latest_deal_month', { ascending: false, nullsFirst: false })
+    .order('latest_deal_day', { ascending: false, nullsFirst: false })
+    .order('latest_price_krw', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: false })
 }
 
 export async function GET(req: NextRequest) {
@@ -83,6 +74,8 @@ export async function GET(req: NextRequest) {
     const page = toPositiveInt(searchParams.get('page'), 1)
     const requestedPageSize = toPositiveInt(searchParams.get('pageSize'), PAGE_SIZE_DEFAULT)
     const pageSize = Math.min(requestedPageSize, PAGE_SIZE_MAX)
+    const from = (page - 1) * pageSize
+    const to = from + pageSize - 1
 
     const prefixes = resolvePrefixes({
       sidoCode: sidoCodeRaw,
@@ -91,30 +84,34 @@ export async function GET(req: NextRequest) {
     })
 
     let query = supabaseAdmin
-      .from('transactions')
-      .select(`
-        id,
-        complex_id,
-        apartment_name,
-        price_krw,
-        area_m2,
-        floor,
-        deal_year,
-        deal_month,
-        deal_day,
-        lawd_code,
-        umd_name,
-        road_name,
-        road_bonbun,
-        road_bubun,
-        build_year,
-        created_at
-      `)
-      .order('created_at', { ascending: false })
-      .limit(RECENT_FETCH_LIMIT)
+      .from('complex_listing_mv')
+      .select(
+        `
+          id,
+          official_name,
+          lawd_code,
+          umd_name,
+          road_name,
+          road_bonbun,
+          road_bubun,
+          build_year,
+          latest_price_krw,
+          latest_area_m2,
+          latest_floor,
+          latest_deal_year,
+          latest_deal_month,
+          latest_deal_day,
+          deal_count,
+          max_price_krw,
+          min_price_krw
+        `,
+        { count: 'exact' }
+      )
 
     if (prefixes.length === 1) {
       query = query.like('lawd_code', `${prefixes[0]}%`)
+    } else if (prefixes.length > 1) {
+      query = query.or(prefixes.map((prefix) => `lawd_code.like.${prefix}%`).join(','))
     }
 
     if (dong) {
@@ -122,10 +119,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (q) {
-      query = query.ilike('apartment_name', `%${q}%`)
+      const safeKeyword = q.replace(/,/g, ' ').trim()
+      query = query.or(
+        `official_name.ilike.%${safeKeyword}%,umd_name.ilike.%${safeKeyword}%,road_name.ilike.%${safeKeyword}%`
+      )
     }
 
-    const { data, error } = await query
+    query = applySort(query, sort).range(from, to)
+
+    const { data, error, count } = await query
 
     if (error) {
       console.error('api/list query error:', error)
@@ -135,103 +137,46 @@ export async function GET(req: NextRequest) {
           message: error.message || '목록 조회 오류',
           error: error.message,
           items: [],
-          pagination: { page, pageSize, hasMore: false },
+          pagination: { page, pageSize, hasMore: false, total: 0 },
         },
         { status: 500 }
       )
     }
 
-    const grouped = new Map<string, any>()
+    const items = (data || []).map((row: any) => ({
+      id: row.id,
+      complex_id: row.id,
+      apartment_name: row.official_name,
+      price_krw: row.latest_price_krw,
+      area_m2: row.latest_area_m2,
+      floor: row.latest_floor,
+      deal_year: row.latest_deal_year,
+      deal_month: row.latest_deal_month,
+      deal_day: row.latest_deal_day,
+      lawd_code: row.lawd_code,
+      umd_name: row.umd_name,
+      road_name: row.road_name,
+      road_bonbun: row.road_bonbun,
+      road_bubun: row.road_bubun,
+      build_year: row.build_year,
+      deal_count: row.deal_count,
+      max_price_krw: row.max_price_krw,
+      min_price_krw: row.min_price_krw,
+    }))
 
-    for (const row of data || []) {
-      const key = getGroupKey(row)
-      const current = grouped.get(key)
-
-      if (!current) {
-        grouped.set(key, {
-          id: row.complex_id || row.id,
-          complex_id: row.complex_id || row.id,
-          apartment_name: row.apartment_name,
-          price_krw: row.price_krw,
-          area_m2: row.area_m2,
-          floor: row.floor,
-          deal_year: row.deal_year,
-          deal_month: row.deal_month,
-          deal_day: row.deal_day,
-          lawd_code: row.lawd_code,
-          dong: row.umd_name,
-          road_name: buildRoadAddress(row),
-          build_year: row.build_year,
-          deal_count: 1,
-          _date: getDateValue(row),
-          _created: getCreatedAtValue(row),
-        })
-        continue
-      }
-
-      current.deal_count += 1
-
-      const newDate = getDateValue(row)
-      const curDate = Number(current._date || 0)
-      const newCreated = getCreatedAtValue(row)
-      const curCreated = Number(current._created || 0)
-
-      if (
-        newCreated > curCreated ||
-        (newCreated === curCreated && newDate > curDate) ||
-        (newCreated === curCreated &&
-          newDate === curDate &&
-          Number(row.price_krw || 0) > Number(current.price_krw || 0))
-      ) {
-        current.id = row.complex_id || row.id
-        current.complex_id = row.complex_id || row.id
-        current.apartment_name = row.apartment_name
-        current.price_krw = row.price_krw
-        current.area_m2 = row.area_m2
-        current.floor = row.floor
-        current.deal_year = row.deal_year
-        current.deal_month = row.deal_month
-        current.deal_day = row.deal_day
-        current.lawd_code = row.lawd_code
-        current.dong = row.umd_name
-        current.road_name = buildRoadAddress(row)
-        current.build_year = row.build_year
-        current._date = newDate
-        current._created = newCreated
-      }
-    }
-
-    let items = Array.from(grouped.values())
-
-    if (sort === 'price_desc') {
-      items.sort((a, b) => Number(b.price_krw || 0) - Number(a.price_krw || 0))
-    } else if (sort === 'price_asc') {
-      items.sort((a, b) => Number(a.price_krw || 0) - Number(b.price_krw || 0))
-    } else {
-      items.sort((a, b) => {
-        if (Number(b._created || 0) !== Number(a._created || 0)) {
-          return Number(b._created || 0) - Number(a._created || 0)
-        }
-        return Number(b._date || 0) - Number(a._date || 0)
-      })
-    }
-
-    const total = items.length
-    const from = (page - 1) * pageSize
-    const to = from + pageSize
-
-    const paged = items
-      .slice(from, to)
-      .map(({ _date, _created, ...rest }) => rest)
+    const total = Number(count || 0)
+    const hasMore = from + items.length < total
 
     return NextResponse.json({
       ok: true,
-      items: paged,
+      items,
       pagination: {
         page,
         pageSize,
-        hasMore: to < total,
+        total,
+        hasMore,
       },
+      source: 'complex_listing_mv',
     })
   } catch (error: any) {
     console.error('api/list unexpected error:', error)
@@ -241,7 +186,7 @@ export async function GET(req: NextRequest) {
         message: error?.message || 'unexpected error',
         error: error?.message,
         items: [],
-        pagination: { page: 1, pageSize: PAGE_SIZE_DEFAULT, hasMore: false },
+        pagination: { page: 1, pageSize: PAGE_SIZE_DEFAULT, hasMore: false, total: 0 },
       },
       { status: 500 }
     )
