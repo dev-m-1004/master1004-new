@@ -50,20 +50,6 @@ function parseDealDate(row: {
   return new Date(Date.UTC(row.deal_year, row.deal_month - 1, row.deal_day))
 }
 
-async function syncComplexMappings() {
-  const insertResult = await supabaseAdmin.rpc('insert_missing_complexes')
-  if (insertResult.error) {
-    throw insertResult.error
-  }
-
-  const updateResult = await supabaseAdmin.rpc(
-    'update_transaction_complex_mapping'
-  )
-  if (updateResult.error) {
-    throw updateResult.error
-  }
-}
-
 type BackfillSingleMonthParams = {
   lawdCode: string
   dealYmd: string
@@ -75,17 +61,41 @@ export async function backfillSingleMonth({
   dealYmd,
   dryRun = false,
 }: BackfillSingleMonthParams) {
-  const rawItems = await fetchMolitApartmentTrades({ lawdCode, dealYmd })
+  console.log('[backfill] start', { lawdCode, dealYmd, dryRun })
 
+  const fetchStartedAt = Date.now()
+  const rawItems = await fetchMolitApartmentTrades({ lawdCode, dealYmd })
+  console.log('[backfill] fetched raw items', {
+    lawdCode,
+    dealYmd,
+    count: rawItems.length,
+    ms: Date.now() - fetchStartedAt,
+  })
+
+  const mapStartedAt = Date.now()
   const mappedRows = rawItems.map((item: any) =>
     mapMolitItemToTransactionRow(item, lawdCode)
   )
+  console.log('[backfill] mapped rows', {
+    lawdCode,
+    dealYmd,
+    count: mappedRows.length,
+    ms: Date.now() - mapStartedAt,
+  })
 
   const { start, end } = getRecent7DayWindow()
 
   const rows = mappedRows.filter((row: any) => {
     const dealDate = parseDealDate(row)
     return dealDate >= start && dealDate <= end
+  })
+
+  console.log('[backfill] filtered rows', {
+    lawdCode,
+    dealYmd,
+    count: rows.length,
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
   })
 
   if (dryRun) {
@@ -100,16 +110,36 @@ export async function backfillSingleMonth({
     }
   }
 
+  let insertedCount = 0
+
   if (rows.length > 0) {
-    const { error } = await supabaseAdmin
-      .from('transactions')
-      .upsert(rows, {
-        onConflict:
-          'lawd_code,apartment_name,deal_year,deal_month,deal_day,area_m2,floor,price_krw',
+    for (const row of rows) {
+      const upsertStartedAt = Date.now()
+
+      const { error } = await supabaseAdmin
+        .from('transactions')
+        .upsert([row], {
+          onConflict:
+            'lawd_code,apartment_name,deal_year,deal_month,deal_day,area_m2,floor,price_krw',
+        })
+
+      console.log('[backfill] single row upsert finished', {
+        lawdCode,
+        dealYmd,
+        apartmentName: row.apartment_name,
+        dealYear: row.deal_year,
+        dealMonth: row.deal_month,
+        dealDay: row.deal_day,
+        ms: Date.now() - upsertStartedAt,
+        hasError: !!error,
+        error: error?.message ?? null,
       })
 
-    if (error) {
-      throw error
+      if (error) {
+        throw error
+      }
+
+      insertedCount += 1
     }
   }
 
@@ -118,7 +148,7 @@ export async function backfillSingleMonth({
     dealYmd,
     fetchedCount: mappedRows.length,
     filteredCount: rows.length,
-    insertedCount: rows.length,
+    insertedCount,
     skippedCount: mappedRows.length - rows.length,
     dryRun: false,
   }

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { backfillSingleMonth } from '@/lib/molit/backfill'
-import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export const maxDuration = 300
 
@@ -21,45 +20,21 @@ function getTargetMonths() {
   return Array.from(new Set([format(current), format(previous)]))
 }
 
-async function refreshAfterImport() {
-  const results: Record<string, any> = {}
-
-  const refreshComplexes = await supabaseAdmin.rpc('refresh_complexes_from_transactions')
-  results.refresh_complexes_from_transactions = {
-    ok: !refreshComplexes.error,
-    error: refreshComplexes.error?.message ?? null,
-  }
-
-  const refreshListing = await supabaseAdmin.rpc('refresh_complex_listing_mv')
-  results.refresh_complex_listing_mv = {
-    ok: !refreshListing.error,
-    error: refreshListing.error?.message ?? null,
-  }
-
-  const refreshHomeSummary = await supabaseAdmin.rpc('refresh_home_summary_mvs')
-  results.refresh_home_summary_mvs = {
-    ok: !refreshHomeSummary.error,
-    error: refreshHomeSummary.error?.message ?? null,
-  }
-
-  return results
-}
-
 export async function GET(req: NextRequest) {
   try {
+    if (!process.env.CRON_SECRET) {
+      return NextResponse.json(
+        { ok: false, error: 'CRON_SECRET is missing' },
+        { status: 500 }
+      )
+    }
+
     const authHeader = req.headers.get('authorization')
 
     if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
       return NextResponse.json(
         { ok: false, error: 'unauthorized' },
         { status: 401 }
-      )
-    }
-
-    if (!process.env.CRON_SECRET) {
-      return NextResponse.json(
-        { ok: false, error: 'CRON_SECRET is missing' },
-        { status: 500 }
       )
     }
 
@@ -109,10 +84,10 @@ export async function GET(req: NextRequest) {
           })
 
           result.push({
-  lawd,
-  ok: true,
-  ...r,
-})
+            lawd,
+            ok: true,
+            ...r,
+          })
         } catch (error: any) {
           console.error('backfill error', { lawd, dealYmd: m, error })
 
@@ -125,21 +100,8 @@ export async function GET(req: NextRequest) {
         }
       }
     }
-async function syncComplexMappings() {
-  const insertResult = await supabaseAdmin.rpc('insert_missing_complexes')
-  if (insertResult.error) {
-    throw insertResult.error
-  }
 
-  const updateResult = await supabaseAdmin.rpc(
-    'update_transaction_complex_mapping'
-  )
-  if (updateResult.error) {
-    throw updateResult.error
-  }
-}
-    await syncComplexMappings()
-const refreshResults = await refreshAfterImport()
+    const refreshResults = { skipped: true }
 
     return NextResponse.json({
       ok: errors.length === 0,
