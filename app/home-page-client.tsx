@@ -105,10 +105,14 @@ type SummaryResponse = {
   ok?: boolean
   message?: string
   latestDealDate?: string | null
-  regionCounts?: RegionCount[]
-  trend?: TrendPoint[]
-  topPriceWeek?: SummaryItem[]
-  topVolumeWeek?: SummaryItem[]
+  regionCounts?: Array<Partial<RegionCount>>
+  region_counts?: Array<Partial<RegionCount>>
+  trend?: Array<{ year?: string | number | null; count?: number | string | null }>
+  trends?: Array<{ year?: string | number | null; count?: number | string | null }>
+  topPriceWeek?: Array<Partial<SummaryItem>>
+  top_price_week?: Array<Partial<SummaryItem>>
+  topVolumeWeek?: Array<Partial<SummaryItem>>
+  top_volume_week?: Array<Partial<SummaryItem>>
 }
 
 const PAGE_SIZE = 30
@@ -159,6 +163,41 @@ function useRecentSearches() {
   }
 
   return { recentSearches, saveSearch }
+}
+
+function normalizeRegionCounts(raw: SummaryResponse) {
+  const source = raw.regionCounts ?? raw.region_counts ?? []
+  return source
+    .map((item) => ({
+      code: String(item.code ?? '').trim(),
+      name: String(item.name ?? '').trim(),
+      count: Number(item.count ?? 0),
+    }))
+    .filter((item) => item.code && item.name)
+}
+
+function normalizeTrend(raw: SummaryResponse): TrendPoint[] {
+  const source = raw.trend ?? raw.trends ?? []
+  return source
+    .map((item) => ({
+      year: String(item.year ?? '').trim(),
+      count: Number(item.count ?? 0),
+    }))
+    .filter((item) => item.year)
+    .sort((a, b) => Number(a.year) - Number(b.year))
+}
+
+function normalizeSummaryItems(source?: Array<Partial<SummaryItem>>): SummaryItem[] {
+  return (source ?? [])
+    .map((item) => ({
+      region_name: item.region_name ? String(item.region_name) : undefined,
+      apartment_name: String(item.apartment_name ?? '').trim(),
+      pyeong: String(item.pyeong ?? '').trim(),
+      price_krw: Number(item.price_krw ?? 0),
+      complex_id: item.complex_id ? String(item.complex_id) : null,
+      count: typeof item.count === 'undefined' ? undefined : Number(item.count),
+    }))
+    .filter((item) => item.apartment_name)
 }
 
 function PriceText({
@@ -479,10 +518,10 @@ export default function HomePageClient() {
         throw new Error(json.message || '메인 요약 조회 실패')
       }
 
-      setRegionCounts(json.regionCounts || [])
-      setTrend(json.trend || [])
-      setTopPriceWeek(json.topPriceWeek || [])
-      setTopVolumeWeek(json.topVolumeWeek || [])
+      setRegionCounts(normalizeRegionCounts(json))
+      setTrend(normalizeTrend(json))
+      setTopPriceWeek(normalizeSummaryItems(json.topPriceWeek ?? json.top_price_week))
+      setTopVolumeWeek(normalizeSummaryItems(json.topVolumeWeek ?? json.top_volume_week))
     } catch (error: any) {
       console.error('메인 요약 조회 실패', error)
       setRegionCounts([])
@@ -542,7 +581,7 @@ export default function HomePageClient() {
 
   const regionCountMap = useMemo(() => {
     const map = new Map<string, number>()
-    for (const item of regionCounts) map.set(item.code, item.count)
+    for (const item of regionCounts) map.set(String(item.code).trim(), Number(item.count || 0))
     return map
   }, [regionCounts])
 
@@ -682,7 +721,7 @@ export default function HomePageClient() {
           <div className="flex flex-wrap gap-2">
             {REGION_BUTTONS.map((region) => {
               const isActive = selectedSidoCode === region.code
-              const count = regionCountMap.get(region.code) || 0
+              const count = regionCountMap.get(region.code) ?? 0
               return (
                 <button
                   key={region.code}

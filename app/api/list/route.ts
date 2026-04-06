@@ -101,12 +101,15 @@ export async function GET(req: NextRequest) {
           latest_deal_year,
           latest_deal_month,
           latest_deal_day,
-          deal_count,
-          max_price_krw,
-          min_price_krw
+          deal_count
         `,
         { count: 'exact' }
       )
+      .not('latest_deal_year', 'is', null)
+      .not('latest_deal_month', 'is', null)
+      .not('latest_deal_day', 'is', null)
+      .not('latest_price_krw', 'is', null)
+      .gt('latest_price_krw', 0)
 
     if (prefixes.length === 1) {
       query = query.like('lawd_code', `${prefixes[0]}%`)
@@ -160,8 +163,6 @@ export async function GET(req: NextRequest) {
       road_bubun: row.road_bubun,
       build_year: row.build_year,
       deal_count: row.deal_count,
-      max_price_krw: row.max_price_krw,
-      min_price_krw: row.min_price_krw,
     }))
 
     const total = Number(count || 0)
