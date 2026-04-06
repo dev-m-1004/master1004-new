@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 
 const PAGE_SIZE_DEFAULT = 30
 const PAGE_SIZE_MAX = 60
-const FETCH_LIMIT_DEFAULT = 500
+const RECENT_FETCH_LIMIT = 200
 
 function toPositiveInt(value: string | null, fallback: number) {
   const parsed = Number(value)
@@ -28,22 +28,10 @@ function resolvePrefixes({
   if (sigunguCode) return [sigunguCode]
   if (!sidoCode) return []
 
-  if (sidoCode === '45') return ['52'] // 전북특별자치도 보정
-  if (sidoCode === '51') return ['42'] // 강원특별자치도 보정
+  if (sidoCode === '45') return ['52'] // 전북특별자치도
+  if (sidoCode === '51') return ['42'] // 강원특별자치도
 
   return [sidoCode]
-}
-
-function getDateKey(row: any) {
-  const y = Number(row.deal_year || 0)
-  const m = Number(row.deal_month || 0)
-  const d = Number(row.deal_day || 0)
-  return y * 10000 + m * 100 + d
-}
-
-function getCreatedAtValue(row: any) {
-  const created = row.created_at ? new Date(row.created_at).getTime() : 0
-  return Number.isFinite(created) ? created : 0
 }
 
 function getGroupKey(row: any) {
@@ -56,6 +44,18 @@ function getGroupKey(row: any) {
     String(row.umd_name || '').trim(),
     String(row.road_name || '').trim(),
   ].join('__')
+}
+
+function getDateValue(row: any) {
+  const y = Number(row.deal_year || 0)
+  const m = Number(row.deal_month || 0)
+  const d = Number(row.deal_day || 0)
+  return y * 10000 + m * 100 + d
+}
+
+function getCreatedAtValue(row: any) {
+  const value = row.created_at ? new Date(row.created_at).getTime() : 0
+  return Number.isFinite(value) ? value : 0
 }
 
 function buildRoadAddress(row: any) {
@@ -111,10 +111,7 @@ export async function GET(req: NextRequest) {
         created_at
       `)
       .order('created_at', { ascending: false })
-      .order('deal_year', { ascending: false })
-      .order('deal_month', { ascending: false })
-      .order('deal_day', { ascending: false })
-      .limit(FETCH_LIMIT_DEFAULT)
+      .limit(RECENT_FETCH_LIMIT)
 
     if (prefixes.length === 1) {
       query = query.like('lawd_code', `${prefixes[0]}%`)
@@ -138,11 +135,7 @@ export async function GET(req: NextRequest) {
           message: error.message || '목록 조회 오류',
           error: error.message,
           items: [],
-          pagination: {
-            page,
-            pageSize,
-            hasMore: false,
-          },
+          pagination: { page, pageSize, hasMore: false },
         },
         { status: 500 }
       )
@@ -153,9 +146,6 @@ export async function GET(req: NextRequest) {
     for (const row of data || []) {
       const key = getGroupKey(row)
       const current = grouped.get(key)
-      const rowCreatedAt = getCreatedAtValue(row)
-      const rowDateKey = getDateKey(row)
-      const rowPrice = Number(row.price_krw || 0)
 
       if (!current) {
         grouped.set(key, {
@@ -170,34 +160,29 @@ export async function GET(req: NextRequest) {
           deal_day: row.deal_day,
           lawd_code: row.lawd_code,
           dong: row.umd_name,
-          umd_name: row.umd_name,
           road_name: buildRoadAddress(row),
           build_year: row.build_year,
           deal_count: 1,
-          _created_at: rowCreatedAt,
-          _date_key: rowDateKey,
-          _max_price: rowPrice,
-          _min_price: rowPrice,
+          _date: getDateValue(row),
+          _created: getCreatedAtValue(row),
         })
         continue
       }
 
       current.deal_count += 1
-      current._max_price = Math.max(Number(current._max_price || 0), rowPrice)
-      current._min_price =
-        current._min_price === 0
-          ? rowPrice
-          : Math.min(Number(current._min_price || 0), rowPrice)
 
-      const shouldReplaceLatest =
-        rowCreatedAt > Number(current._created_at || 0) ||
-        (rowCreatedAt === Number(current._created_at || 0) &&
-          rowDateKey > Number(current._date_key || 0)) ||
-        (rowCreatedAt === Number(current._created_at || 0) &&
-          rowDateKey === Number(current._date_key || 0) &&
-          rowPrice > Number(current.price_krw || 0))
+      const newDate = getDateValue(row)
+      const curDate = Number(current._date || 0)
+      const newCreated = getCreatedAtValue(row)
+      const curCreated = Number(current._created || 0)
 
-      if (shouldReplaceLatest) {
+      if (
+        newCreated > curCreated ||
+        (newCreated === curCreated && newDate > curDate) ||
+        (newCreated === curCreated &&
+          newDate === curDate &&
+          Number(row.price_krw || 0) > Number(current.price_krw || 0))
+      ) {
         current.id = row.complex_id || row.id
         current.complex_id = row.complex_id || row.id
         current.apartment_name = row.apartment_name
@@ -209,11 +194,10 @@ export async function GET(req: NextRequest) {
         current.deal_day = row.deal_day
         current.lawd_code = row.lawd_code
         current.dong = row.umd_name
-        current.umd_name = row.umd_name
         current.road_name = buildRoadAddress(row)
         current.build_year = row.build_year
-        current._created_at = rowCreatedAt
-        current._date_key = rowDateKey
+        current._date = newDate
+        current._created = newCreated
       }
     }
 
@@ -225,13 +209,10 @@ export async function GET(req: NextRequest) {
       items.sort((a, b) => Number(a.price_krw || 0) - Number(b.price_krw || 0))
     } else {
       items.sort((a, b) => {
-        if (Number(b._created_at || 0) !== Number(a._created_at || 0)) {
-          return Number(b._created_at || 0) - Number(a._created_at || 0)
+        if (Number(b._created || 0) !== Number(a._created || 0)) {
+          return Number(b._created || 0) - Number(a._created || 0)
         }
-        if (Number(b._date_key || 0) !== Number(a._date_key || 0)) {
-          return Number(b._date_key || 0) - Number(a._date_key || 0)
-        }
-        return Number(b.price_krw || 0) - Number(a.price_krw || 0)
+        return Number(b._date || 0) - Number(a._date || 0)
       })
     }
 
@@ -239,9 +220,9 @@ export async function GET(req: NextRequest) {
     const from = (page - 1) * pageSize
     const to = from + pageSize
 
-    const paged = items.slice(from, to).map(
-      ({ _created_at, _date_key, _max_price, _min_price, ...rest }) => rest
-    )
+    const paged = items
+      .slice(from, to)
+      .map(({ _date, _created, ...rest }) => rest)
 
     return NextResponse.json({
       ok: true,
@@ -254,18 +235,13 @@ export async function GET(req: NextRequest) {
     })
   } catch (error: any) {
     console.error('api/list unexpected error:', error)
-
     return NextResponse.json(
       {
         ok: false,
         message: error?.message || 'unexpected error',
         error: error?.message,
         items: [],
-        pagination: {
-          page: 1,
-          pageSize: PAGE_SIZE_DEFAULT,
-          hasMore: false,
-        },
+        pagination: { page: 1, pageSize: PAGE_SIZE_DEFAULT, hasMore: false },
       },
       { status: 500 }
     )
