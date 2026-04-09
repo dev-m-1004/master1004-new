@@ -124,15 +124,17 @@ function isValidGroup(group: string): group is CollectGroup {
   return ['1', '2', '3', '4'].includes(group)
 }
 
-function logStageEvent(
-  phase: 'start' | 'finish',
-  payload: Record<string, unknown>
-) {
+function logStageEvent(phase: 'start' | 'finish', payload: Record<string, unknown>) {
   const label = phase === 'start' ? '[admin-ops] stage started' : '[admin-ops] stage finished'
   console.log(label, payload)
 }
 
-function parseBody(body: RunBody): { mode: Mode; targetGroup?: CollectGroup; options: PostprocessOptions } {
+function parseBody(body: RunBody): {
+  mode: Mode
+  targetGroup?: CollectGroup
+  invalidGroup?: string
+  options: PostprocessOptions
+} {
   const mode = String(body?.mode || 'postprocess') as Mode
   const rawGroup = body?.group == null ? '' : String(body.group).trim()
   const targetGroup = isValidGroup(rawGroup) ? rawGroup : undefined
@@ -140,6 +142,7 @@ function parseBody(body: RunBody): { mode: Mode; targetGroup?: CollectGroup; opt
   return {
     mode,
     targetGroup,
+    invalidGroup: rawGroup && !targetGroup ? rawGroup : undefined,
     options: {
       recentDays: toPositiveInt(body?.recentDays ?? process.env.ADMIN_OPS_RECENT_DAYS, 3),
       batchLimit: toPositiveInt(body?.batchLimit ?? process.env.ADMIN_OPS_BATCH_LIMIT, 5000),
@@ -441,8 +444,10 @@ async function runPostprocess(
     }
   }
 
-  revalidatePath('/')
-  revalidatePath('/publish')
+  if (targetModes.includes('listing') || targetModes.includes('summary')) {
+    revalidatePath('/')
+    revalidatePath('/publish')
+  }
   revalidatePath('/admin/ops')
 
   return { ok: true, steps }
@@ -456,10 +461,32 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json().catch(() => ({}))) as RunBody
-    const { mode, targetGroup, options } = parseBody(body)
+    const { mode, targetGroup, invalidGroup, options } = parseBody(body)
 
     if (!isValidMode(mode)) {
-      return NextResponse.json({ ok: false, error: 'invalid mode' }, { status: 400 })
+      return NextResponse.json(
+        {
+          ok: false,
+          mode,
+          targetGroup: null,
+          options,
+          error: 'invalid mode',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (invalidGroup) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mode,
+          targetGroup: null,
+          options,
+          error: `invalid group: ${invalidGroup}`,
+        },
+        { status: 400 }
+      )
     }
 
     const startedAt = new Date()
