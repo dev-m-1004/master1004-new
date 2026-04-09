@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   buildJobPayload,
   enqueueAdminOpsJob,
+  enqueueAdminOpsPipeline,
   parseRunJobRequest,
+  type AdminOpsJobPayload,
 } from '@/lib/admin-ops/jobs'
 
 export const maxDuration = 30
@@ -52,27 +54,136 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const payload = buildJobPayload({
-      mode,
-      targetGroup,
-      recentDays: options.recentDays,
-      batchLimit: options.batchLimit,
-    })
+    const startedAt = new Date().toISOString()
 
-    const job = await enqueueAdminOpsJob(payload)
+    if (mode === 'collect' || mode === 'map' || mode === 'listing' || mode === 'summary') {
+      const payload = buildJobPayload({
+        mode,
+        targetGroup,
+        recentDays: options.recentDays,
+        batchLimit: options.batchLimit,
+      })
+
+      if (mode === 'collect' && !payload.group) {
+        return NextResponse.json(
+          {
+            ok: false,
+            mode,
+            targetGroup: null,
+            options,
+            error: 'collect mode requires group',
+          },
+          { status: 400 }
+        )
+      }
+
+      const job = await enqueueAdminOpsJob(payload)
+
+      return NextResponse.json({
+        ok: true,
+        mode,
+        startedAt,
+        queuedCount: 1,
+        jobId: job.id,
+        status: job.status,
+        targetGroup: job.payload.group || null,
+        options: {
+          recentDays: job.payload.recentDays,
+          batchLimit: job.payload.batchLimit,
+        },
+        queuedAt: job.createdAt,
+        message: 'job queued',
+      })
+    }
+
+    let payloads: AdminOpsJobPayload[]
+
+    if (mode === 'postprocess') {
+      payloads = [
+        buildJobPayload({
+          mode: 'map',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'listing',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'summary',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+      ]
+    } else {
+      payloads = [
+        buildJobPayload({
+          mode: 'collect',
+          targetGroup: '1',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'collect',
+          targetGroup: '2',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'collect',
+          targetGroup: '3',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'collect',
+          targetGroup: '4',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'map',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'listing',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+        buildJobPayload({
+          mode: 'summary',
+          recentDays: options.recentDays,
+          batchLimit: options.batchLimit,
+        }),
+      ]
+    }
+
+    const jobs = await enqueueAdminOpsPipeline(payloads)
 
     return NextResponse.json({
       ok: true,
       mode,
-      jobId: job.id,
-      status: job.status,
-      targetGroup: job.payload.group || null,
-      options: {
+      startedAt,
+      queuedCount: jobs.length,
+      status: 'queued',
+      targetGroup: mode === 'all' ? 'all' : null,
+      options,
+      queuedAt: jobs[0]?.createdAt || null,
+      jobs: jobs.map((job) => ({
+        id: job.id,
+        jobType: job.jobType,
+        status: job.status,
+        targetGroup: job.payload.group || null,
         recentDays: job.payload.recentDays,
         batchLimit: job.payload.batchLimit,
-      },
-      queuedAt: job.createdAt,
-      message: 'job queued',
+        queuedAt: job.createdAt,
+      })),
+      message:
+        mode === 'all'
+          ? 'pipeline queued: collect group1~4 -> map -> listing -> summary'
+          : 'pipeline queued: map -> listing -> summary',
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'server error'

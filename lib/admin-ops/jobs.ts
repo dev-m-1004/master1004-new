@@ -233,6 +233,17 @@ export async function enqueueAdminOpsJob(payload: AdminOpsJobPayload) {
   return job
 }
 
+export async function enqueueAdminOpsPipeline(payloads: AdminOpsJobPayload[]) {
+  const jobs: AdminOpsJobRecord[] = []
+
+  for (const payload of payloads) {
+    const job = await enqueueAdminOpsJob(payload)
+    jobs.push(job)
+  }
+
+  return jobs
+}
+
 export async function listRecentAdminOpsJobs(limit = 10) {
   const safeLimit = Math.min(Math.max(limit, 1), 30)
   const { data, error } = await supabaseAdmin

@@ -57,9 +57,7 @@ begin
 end;
 $$;
 
--- Run the indexes below one line at a time in Supabase SQL Editor.
--- CREATE INDEX CONCURRENTLY cannot run inside a transaction block.
-
+-- run the CREATE INDEX CONCURRENTLY statements below one at a time in Supabase SQL Editor.
 create index concurrently if not exists idx_transactions_unmatched_recent
 on public.transactions (deal_date desc, id desc)
 where complex_id is null;
