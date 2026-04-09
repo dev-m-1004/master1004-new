@@ -1,6 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+
+type HealthTone = 'healthy' | 'warning' | 'danger'
+type ActionMode = 'collect' | 'map' | 'listing' | 'summary' | 'postprocess' | 'all'
+type CollectGroup = '1' | '2' | '3' | '4'
 
 type OpsStatus = {
   ok: boolean
@@ -14,37 +18,60 @@ type OpsStatus = {
   homeSummaryLatestDealDate: string | null
   homeSummaryRegionCount: number
   health: {
-    collect: 'healthy' | 'warning' | 'danger'
-    mapping: 'healthy' | 'warning' | 'danger'
-    listing: 'healthy' | 'warning' | 'danger'
-    summary: 'healthy' | 'warning' | 'danger'
+    collect: HealthTone
+    mapping: HealthTone
+    listing: HealthTone
+    summary: HealthTone
   }
+}
+
+type CollectResult = {
+  ok: boolean
+  months: string[]
+  groups: Array<{
+    group: string
+    lawdCodeCount: number
+    resultCount: number
+    errorCount: number
+  }>
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
+  steps?: Array<{
+    key: string
+    ok: boolean
+    message: string
+    startedAt?: string
+    finishedAt?: string
+    durationMs?: number
+  }>
+}
+
+type PostprocessStep = {
+  key: string
+  ok: boolean
+  message: string
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
 }
 
 type ActionResult = {
   ok: boolean
-  mode: 'collect' | 'postprocess' | 'all'
+  mode: ActionMode
   startedAt: string
   finishedAt: string
   durationMs: number
-  collect?: {
-    ok: boolean
-    months: string[]
-    groups: Array<{
-      group: string
-      lawdCodeCount: number
-      resultCount: number
-      errorCount: number
-    }>
-  }
+  collect?: CollectResult
   postprocess?: {
     ok: boolean
-    steps: Array<{
-      key: string
-      ok: boolean
-      message: string
-    }>
+    steps: PostprocessStep[]
   }
+  options?: {
+    recentDays: number
+    batchLimit: number
+  }
+  targetGroup?: CollectGroup | null
   error?: string
 }
 
@@ -57,6 +84,13 @@ type LogItem = {
 }
 
 const SECRET_KEY = 'master1004-admin-secret'
+const COLLECT_GROUP_OPTIONS: Array<{ label: string; value: '' | CollectGroup }> = [
+  { label: '전체 그룹', value: '' },
+  { label: 'GROUP 1', value: '1' },
+  { label: 'GROUP 2', value: '2' },
+  { label: 'GROUP 3', value: '3' },
+  { label: 'GROUP 4', value: '4' },
+]
 
 function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
@@ -90,13 +124,13 @@ function formatDuration(ms?: number) {
   return `${minutes}분 ${remain}초`
 }
 
-function toneByHealth(value: 'healthy' | 'warning' | 'danger') {
+function toneByHealth(value: HealthTone) {
   if (value === 'healthy') return 'bg-emerald-50 text-emerald-700 ring-emerald-200'
   if (value === 'warning') return 'bg-amber-50 text-amber-700 ring-amber-200'
   return 'bg-rose-50 text-rose-700 ring-rose-200'
 }
 
-function labelByHealth(value: 'healthy' | 'warning' | 'danger') {
+function labelByHealth(value: HealthTone) {
   if (value === 'healthy') return '정상'
   if (value === 'warning') return '확인 필요'
   return '장애'
@@ -117,14 +151,26 @@ async function readJson<T>(response: Response): Promise<T> {
   }
 }
 
+const modeLabelMap: Record<ActionMode, string> = {
+  collect: '자료수집',
+  map: '매핑',
+  listing: '메인 리스트 갱신',
+  summary: '홈 요약 갱신',
+  postprocess: '전체 후처리',
+  all: '전체 실행',
+}
+
 export default function AdminOpsClient() {
   const [secret, setSecret] = useState('')
   const [status, setStatus] = useState<OpsStatus | null>(null)
   const [loadingStatus, setLoadingStatus] = useState(false)
-  const [runningMode, setRunningMode] = useState<ActionResult['mode'] | null>(null)
+  const [runningMode, setRunningMode] = useState<ActionMode | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [result, setResult] = useState<ActionResult | null>(null)
   const [logs, setLogs] = useState<LogItem[]>([])
+  const [collectGroup, setCollectGroup] = useState<'' | CollectGroup>('1')
+  const [recentDays, setRecentDays] = useState('3')
+  const [batchLimit, setBatchLimit] = useState('5000')
 
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? sessionStorage.getItem(SECRET_KEY) : null
@@ -139,7 +185,7 @@ export default function AdminOpsClient() {
       body,
       time: new Date().toISOString(),
     }
-    setLogs((prev) => [item, ...prev].slice(0, 30))
+    setLogs((prev) => [item, ...prev].slice(0, 40))
   }, [])
 
   const saveSecret = useCallback(() => {
@@ -165,13 +211,14 @@ export default function AdminOpsClient() {
 
       const json = await readJson<OpsStatus & { message?: string }>(res)
       if (!res.ok || !json.ok) {
-        throw new Error((json as any).message || '상태 조회에 실패했습니다.')
+        throw new Error((json as { message?: string }).message || '상태 조회에 실패했습니다.')
       }
 
       setStatus(json)
       pushLog('success', '상태를 새로고침했습니다.', `최근 거래일: ${json.latestDealDate ?? '-'}`)
-    } catch (error: any) {
-      pushLog('error', '상태 조회 실패', error?.message || '알 수 없는 오류')
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '알 수 없는 오류'
+      pushLog('error', '상태 조회 실패', message)
     } finally {
       setLoadingStatus(false)
     }
@@ -185,10 +232,19 @@ export default function AdminOpsClient() {
   }, [autoRefresh, loadStatus, secret])
 
   const runAction = useCallback(
-    async (mode: ActionResult['mode']) => {
+    async (mode: ActionMode) => {
       if (!secret.trim()) {
         pushLog('error', '관리자 키가 필요합니다.', '먼저 관리자 키를 입력하고 저장해 주세요.')
         return
+      }
+
+      const recentDaysValue = Math.max(1, Number(recentDays) || 3)
+      const batchLimitValue = Math.max(1, Number(batchLimit) || 5000)
+      const body = {
+        mode,
+        group: collectGroup || undefined,
+        recentDays: recentDaysValue,
+        batchLimit: batchLimitValue,
       }
 
       setRunningMode(mode)
@@ -199,24 +255,29 @@ export default function AdminOpsClient() {
             'Content-Type': 'application/json',
             'x-admin-secret': secret.trim(),
           },
-          body: JSON.stringify({ mode }),
+          body: JSON.stringify(body),
         })
 
         const json = await readJson<ActionResult & { message?: string }>(res)
         if (!res.ok || !json.ok) {
-          throw new Error((json as any).error || (json as any).message || '실행에 실패했습니다.')
+          throw new Error(json.error || json.message || '실행에 실패했습니다.')
         }
 
         setResult(json)
-        pushLog('success', `${modeLabelMap[mode]} 완료`, `소요 시간: ${formatDuration(json.durationMs)}`)
+        const extra =
+          mode === 'collect'
+            ? `대상: ${json.targetGroup ? `GROUP ${json.targetGroup}` : '전체 그룹'}`
+            : `소요 시간: ${formatDuration(json.durationMs)}`
+        pushLog('success', `${modeLabelMap[mode]} 완료`, extra)
         await loadStatus()
-      } catch (error: any) {
-        pushLog('error', `${modeLabelMap[mode]} 실패`, error?.message || '알 수 없는 오류')
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : '알 수 없는 오류'
+        pushLog('error', `${modeLabelMap[mode]} 실패`, message)
       } finally {
         setRunningMode(null)
       }
     },
-    [loadStatus, pushLog, secret]
+    [batchLimit, collectGroup, loadStatus, pushLog, recentDays, secret]
   )
 
   const statusCards = useMemo(() => {
@@ -249,10 +310,19 @@ export default function AdminOpsClient() {
     if (!result) return []
     const rows: Array<{ label: string; value: string }> = [
       { label: '실행 모드', value: modeLabelMap[result.mode] },
+      {
+        label: '수집 대상 그룹',
+        value: result.targetGroup ? `GROUP ${result.targetGroup}` : '전체 그룹',
+      },
       { label: '시작 시각', value: formatDateTime(result.startedAt) },
       { label: '종료 시각', value: formatDateTime(result.finishedAt) },
       { label: '총 소요 시간', value: formatDuration(result.durationMs) },
     ]
+
+    if (result.options) {
+      rows.push({ label: '최근 거래 기준', value: `${result.options.recentDays}일` })
+      rows.push({ label: '배치 한도', value: `${result.options.batchLimit.toLocaleString()}건` })
+    }
 
     if (result.collect) {
       rows.push({ label: '수집 대상 월', value: result.collect.months.join(', ') })
@@ -268,13 +338,15 @@ export default function AdminOpsClient() {
       rows.push({
         label: '후처리 단계',
         value: result.postprocess.steps
-          .map((step) => `${step.key}:${step.ok ? '완료' : '실패'}`)
+          .map((step) => `${step.key}:${step.ok ? '완료' : '실패'}(${formatDuration(step.durationMs)})`)
           .join(' · '),
       })
     }
 
     return rows
   }, [result])
+
+  const canRun = !!secret.trim() && !runningMode
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -286,16 +358,16 @@ export default function AdminOpsClient() {
                 MASTER1004 운영실
               </div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                자료수집 · 후처리 · 상태확인을 한 화면에서 관리하세요
+                자료수집은 그룹 단위로, 후처리는 단계별로 분리해 운영하세요
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200 sm:text-base">
-                매일 운영자는 세 가지만 보면 됩니다. 오늘 데이터가 들어왔는지, 미연결 거래가 0인지,
-                메인 최신 거래일이 밀리지 않았는지. 이상이 있으면 후처리 한 번으로 대부분 복구됩니다.
+                자료수집 timeout을 줄이기 위해 group 단위 수집을 먼저 권장합니다. 후처리는
+                매핑 → 메인 리스트 → 홈 요약 순서로 쪼개 실행할 수 있게 구성했습니다.
               </p>
               <div className="mt-5 flex flex-wrap gap-2 text-xs text-slate-200">
-                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">수집 전용</span>
-                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">후처리 분리</span>
-                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">1분 자동 새로고침</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">collect 분할</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">map / listing / summary</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">단계별 duration 기록</span>
               </div>
             </div>
 
@@ -370,35 +442,95 @@ export default function AdminOpsClient() {
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">운영 실행 패널</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  자료수집, 후처리, 전체실행 중 필요한 작업을 버튼 한 번으로 처리합니다.
+                  timeout 회피를 위해 자료수집은 그룹 단위, 후처리는 단계 단위로 실행하는 구성을 반영했습니다.
                 </p>
               </div>
             </div>
 
-            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <div className="mt-5 grid gap-4 rounded-[24px] bg-slate-50 p-4 ring-1 ring-slate-200 md:grid-cols-3">
+              <FieldBox label="자료수집 그룹">
+                <select
+                  value={collectGroup}
+                  onChange={(e) => setCollectGroup(e.target.value as '' | CollectGroup)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-400"
+                >
+                  {COLLECT_GROUP_OPTIONS.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBox>
+              <FieldBox label="최근 거래 기준(일)">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={recentDays}
+                  onChange={(e) => setRecentDays(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-400"
+                />
+              </FieldBox>
+              <FieldBox label="매핑 배치 한도">
+                <input
+                  type="number"
+                  min={1}
+                  step={100}
+                  value={batchLimit}
+                  onChange={(e) => setBatchLimit(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-400"
+                />
+              </FieldBox>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <ActionCard
                 title="자료수집 실행"
-                description="등록된 group 1~4를 순서대로 돌려 오늘과 전월 데이터를 가져옵니다."
-                buttonLabel={runningMode === 'collect' ? '수집 실행 중...' : '자료수집'}
+                description={collectGroup ? `선택한 GROUP ${collectGroup}만 수집합니다.` : 'group 1~4 전체를 순서대로 수집합니다.'}
+                buttonLabel={runningMode === 'collect' ? '자료수집 실행 중...' : collectGroup ? `GROUP ${collectGroup} 수집` : '전체 그룹 수집'}
                 buttonTone="slate"
                 onClick={() => runAction('collect')}
-                disabled={!!runningMode}
+                disabled={!canRun}
               />
               <ActionCard
-                title="후처리 실행"
-                description="complex_id 매핑, 메인 리스트 MV, 홈 요약 MV를 순서대로 새로고침합니다."
-                buttonLabel={runningMode === 'postprocess' ? '후처리 실행 중...' : '후처리'}
+                title="매핑 실행"
+                description="최근 거래만 complex_id 매핑합니다. recent RPC가 없으면 TODO 메시지를 보여줍니다."
+                buttonLabel={runningMode === 'map' ? '매핑 실행 중...' : '매핑'}
+                buttonTone="violet"
+                onClick={() => runAction('map')}
+                disabled={!canRun}
+              />
+              <ActionCard
+                title="메인 리스트 갱신"
+                description="complex_listing_mv 새로고침만 단독 실행합니다."
+                buttonLabel={runningMode === 'listing' ? '메인 리스트 갱신 중...' : '메인 리스트'}
                 buttonTone="emerald"
+                onClick={() => runAction('listing')}
+                disabled={!canRun}
+              />
+              <ActionCard
+                title="홈 요약 갱신"
+                description="home summary MV 갱신만 단독 실행합니다."
+                buttonLabel={runningMode === 'summary' ? '홈 요약 갱신 중...' : '홈 요약'}
+                buttonTone="amber"
+                onClick={() => runAction('summary')}
+                disabled={!canRun}
+              />
+              <ActionCard
+                title="전체 후처리"
+                description="매핑 → 메인 리스트 → 홈 요약 순서로 실행합니다."
+                buttonLabel={runningMode === 'postprocess' ? '전체 후처리 중...' : '전체 후처리'}
+                buttonTone="sky"
                 onClick={() => runAction('postprocess')}
-                disabled={!!runningMode}
+                disabled={!canRun}
               />
               <ActionCard
                 title="전체 실행"
-                description="자료수집부터 후처리까지 한 번에 실행합니다. 야간 배치 점검용으로 적합합니다."
+                description="선택 그룹 수집 후 전체 후처리까지 이어서 실행합니다. timeout 가능성이 있어 점검용으로만 권장합니다."
                 buttonLabel={runningMode === 'all' ? '전체 실행 중...' : '전체 실행'}
-                buttonTone="sky"
+                buttonTone="rose"
                 onClick={() => runAction('all')}
-                disabled={!!runningMode}
+                disabled={!canRun}
               />
             </div>
 
@@ -406,10 +538,14 @@ export default function AdminOpsClient() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-slate-900">실행 결과 요약</h3>
                 {result ? (
-                  <span className={cn(
-                    'rounded-full px-3 py-1 text-xs font-medium ring-1',
-                    result.ok ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-rose-200'
-                  )}>
+                  <span
+                    className={cn(
+                      'rounded-full px-3 py-1 text-xs font-medium ring-1',
+                      result.ok
+                        ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                        : 'bg-rose-50 text-rose-700 ring-rose-200'
+                    )}
+                  >
                     {result.ok ? '완료' : '실패'}
                   </span>
                 ) : null}
@@ -428,6 +564,25 @@ export default function AdminOpsClient() {
                   아직 실행 기록이 없습니다. 먼저 상태를 확인하고 필요한 버튼을 눌러 보세요.
                 </div>
               )}
+
+              {result?.postprocess?.steps?.length ? (
+                <div className="mt-4 space-y-2">
+                  {result.postprocess.steps.map((step) => (
+                    <div key={`${step.key}-${step.startedAt || ''}`} className="rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-semibold text-slate-900">{step.key}</div>
+                        <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium ring-1', step.ok ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-rose-200')}>
+                          {step.ok ? '완료' : '실패'}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-sm text-slate-600">{step.message}</div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        {formatDateTime(step.startedAt)} → {formatDateTime(step.finishedAt)} · {formatDuration(step.durationMs)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -471,16 +626,28 @@ export default function AdminOpsClient() {
           <h2 className="text-lg font-semibold text-slate-900">운영 가이드</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             <GuideCard
-              title="평소 운영"
-              items={['상태 확인을 눌러 최근 거래일을 봅니다.', '미연결 거래가 0이면 정상입니다.', '메인 최신 거래일이 최근 거래일과 같으면 정상입니다.']}
+              title="권장 실행 순서"
+              items={[
+                '1차는 GROUP 1만 자료수집을 실행합니다.',
+                '자료수집 성공 후 매핑 → 메인 리스트 → 홈 요약 순서로 실행합니다.',
+                '전체 실행은 야간 점검용으로만 사용합니다.',
+              ]}
             />
             <GuideCard
-              title="이상 징후"
-              items={['publish만 최신이면 후처리를 실행합니다.', '상세 링크가 안 보이면 후처리를 먼저 실행합니다.', '메인 리스트가 비면 후처리를 먼저 실행합니다.']}
+              title="오류가 날 때"
+              items={[
+                '자료수집 timeout이면 그룹을 더 잘게 나누거나 cron으로 옮깁니다.',
+                '매핑 TODO가 보이면 Supabase recent RPC를 먼저 생성합니다.',
+                'listing 또는 summary만 느리면 해당 MV부터 따로 점검합니다.',
+              ]}
             />
             <GuideCard
-              title="권장 순서"
-              items={['아침 자동 수집 후 후처리를 분리 실행합니다.', '문제 시에는 전체 실행보다 후처리를 먼저 시도합니다.', '야간 장애 복구는 전체 실행 1회 후 상태를 다시 확인합니다.']}
+              title="권장 기본값"
+              items={[
+                'recentDays = 3',
+                'batchLimit = 5000',
+                '첫 테스트는 전체 그룹이 아닌 GROUP 1부터 시작',
+              ]}
             />
           </div>
         </section>
@@ -489,10 +656,13 @@ export default function AdminOpsClient() {
   )
 }
 
-const modeLabelMap: Record<ActionResult['mode'], string> = {
-  collect: '자료수집',
-  postprocess: '후처리',
-  all: '전체 실행',
+function FieldBox({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      {children}
+    </div>
+  )
 }
 
 function ActionCard({
@@ -506,26 +676,32 @@ function ActionCard({
   title: string
   description: string
   buttonLabel: string
-  buttonTone: 'slate' | 'emerald' | 'sky'
+  buttonTone: 'slate' | 'violet' | 'emerald' | 'amber' | 'sky' | 'rose'
   onClick: () => void
   disabled?: boolean
 }) {
   const buttonClass =
-    buttonTone === 'emerald'
-      ? 'bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-300'
-      : buttonTone === 'sky'
-        ? 'bg-sky-500 hover:bg-sky-400 disabled:bg-sky-300'
-        : 'bg-slate-900 hover:bg-slate-700 disabled:bg-slate-400'
+    buttonTone === 'violet'
+      ? 'bg-violet-500 hover:bg-violet-400 disabled:bg-violet-300'
+      : buttonTone === 'emerald'
+        ? 'bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-300'
+        : buttonTone === 'amber'
+          ? 'bg-amber-500 hover:bg-amber-400 disabled:bg-amber-300'
+          : buttonTone === 'sky'
+            ? 'bg-sky-500 hover:bg-sky-400 disabled:bg-sky-300'
+            : buttonTone === 'rose'
+              ? 'bg-rose-500 hover:bg-rose-400 disabled:bg-rose-300'
+              : 'bg-slate-900 hover:bg-slate-700 disabled:bg-slate-400'
 
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-      <div className="text-base font-semibold text-slate-900">{title}</div>
-      <div className="mt-2 min-h-[66px] text-sm leading-6 text-slate-600">{description}</div>
+    <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+      <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+      <p className="mt-2 min-h-[72px] text-sm leading-6 text-slate-600">{description}</p>
       <button
         onClick={onClick}
         disabled={disabled}
         className={cn(
-          'mt-4 w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed',
+          'mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed',
           buttonClass
         )}
       >
@@ -535,22 +711,14 @@ function ActionCard({
   )
 }
 
-function HealthRow({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: 'healthy' | 'warning' | 'danger'
-  detail: string
-}) {
+function HealthRow({ label, value, detail }: { label: string; value: HealthTone; detail: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3">
+    <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
       <div>
         <div className="text-sm font-semibold text-slate-900">{label}</div>
         <div className="mt-1 text-xs text-slate-500">{detail}</div>
       </div>
-      <span className={cn('rounded-full px-3 py-1 text-xs font-medium ring-1', toneByHealth(value))}>
+      <span className={cn('rounded-full px-3 py-1 text-xs font-semibold ring-1', toneByHealth(value))}>
         {labelByHealth(value)}
       </span>
     </div>
@@ -559,16 +727,13 @@ function HealthRow({
 
 function GuideCard({ title, items }: { title: string; items: string[] }) {
   return (
-    <div className="rounded-[24px] bg-slate-50 p-4 ring-1 ring-slate-200">
+    <div className="rounded-[24px] bg-slate-50 p-5 ring-1 ring-slate-200">
       <div className="text-base font-semibold text-slate-900">{title}</div>
-      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+      <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
         {items.map((item) => (
-          <li key={item} className="flex gap-2">
-            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-400" />
-            <span>{item}</span>
-          </li>
+          <div key={item}>• {item}</div>
         ))}
-      </ul>
+      </div>
     </div>
   )
 }

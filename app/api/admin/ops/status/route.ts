@@ -11,7 +11,7 @@ function sameDay(a?: string | null, b?: string | null) {
   return String(a).slice(0, 10) === String(b).slice(0, 10)
 }
 
-async function getCount(query: PromiseLike<{ count: number | null; error: any }>) {
+async function getCount(query: PromiseLike<{ count: number | null; error: unknown }>) {
   const { count, error } = await query
   if (error) throw error
   return Number(count || 0)
@@ -24,61 +24,58 @@ export async function GET(req: NextRequest) {
       return unauthorized()
     }
 
-    const [latestTx, totalUnmatchedCount, todaySummary, listingLatest, listingCount, homeSummary] =
-      await Promise.all([
+    const [latestTx, totalUnmatchedCount, listingLatest, listingCount, homeSummary] = await Promise.all([
+      supabaseAdmin
+        .from('transactions')
+        .select('deal_date', { head: false })
+        .not('deal_date', 'is', null)
+        .order('deal_date', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      getCount(
         supabaseAdmin
           .from('transactions')
-          .select('deal_date', { head: false })
-          .not('deal_date', 'is', null)
-          .order('deal_date', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        getCount(
-          supabaseAdmin
-            .from('transactions')
-            .select('*', { count: 'exact', head: true })
-            .is('complex_id', null)
-        ),
-        getHomeSummary(),
+          .select('*', { count: 'exact', head: true })
+          .is('complex_id', null)
+      ),
+      supabaseAdmin
+        .from('complex_listing_mv')
+        .select('latest_deal_year, latest_deal_month, latest_deal_day')
+        .order('latest_deal_year', { ascending: false, nullsFirst: false })
+        .order('latest_deal_month', { ascending: false, nullsFirst: false })
+        .order('latest_deal_day', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle(),
+      getCount(
         supabaseAdmin
           .from('complex_listing_mv')
-          .select('latest_deal_year, latest_deal_month, latest_deal_day')
-          .order('latest_deal_year', { ascending: false, nullsFirst: false })
-          .order('latest_deal_month', { ascending: false, nullsFirst: false })
-          .order('latest_deal_day', { ascending: false, nullsFirst: false })
-          .limit(1)
-          .maybeSingle(),
-        getCount(
-          supabaseAdmin
-            .from('complex_listing_mv')
-            .select('*', { count: 'exact', head: true })
-        ),
-        getHomeSummary(),
-      ])
+          .select('*', { count: 'exact', head: true })
+      ),
+      getHomeSummary(),
+    ])
 
     if (latestTx.error) throw latestTx.error
     if (listingLatest.error) throw listingLatest.error
 
     const latestDealDate = latestTx.data?.deal_date ? String(latestTx.data.deal_date) : null
 
-    const todayTransactionCount = latestDealDate
-      ? await getCount(
-          supabaseAdmin
-            .from('transactions')
-            .select('*', { count: 'exact', head: true })
-            .eq('deal_date', latestDealDate)
-        )
-      : 0
-
-    const latestDealUnmatchedCount = latestDealDate
-      ? await getCount(
-          supabaseAdmin
-            .from('transactions')
-            .select('*', { count: 'exact', head: true })
-            .eq('deal_date', latestDealDate)
-            .is('complex_id', null)
-        )
-      : 0
+    const [todayTransactionCount, latestDealUnmatchedCount] = latestDealDate
+      ? await Promise.all([
+          getCount(
+            supabaseAdmin
+              .from('transactions')
+              .select('*', { count: 'exact', head: true })
+              .eq('deal_date', latestDealDate)
+          ),
+          getCount(
+            supabaseAdmin
+              .from('transactions')
+              .select('*', { count: 'exact', head: true })
+              .eq('deal_date', latestDealDate)
+              .is('complex_id', null)
+          ),
+        ])
+      : [0, 0]
 
     const listingDate =
       listingLatest.data?.latest_deal_year &&
@@ -87,8 +84,8 @@ export async function GET(req: NextRequest) {
         ? `${listingLatest.data.latest_deal_year}-${String(listingLatest.data.latest_deal_month).padStart(2, '0')}-${String(listingLatest.data.latest_deal_day).padStart(2, '0')}`
         : null
 
-    const homeSummaryLatestDealDate =
-      (todaySummary as any)?.latestDealDate || (homeSummary as any)?.latestDealDate || null
+    const homeSummaryLatestDealDate = (homeSummary as { latestDealDate?: string | null })?.latestDealDate || null
+    const regionCounts = (homeSummary as { regionCounts?: unknown[] })?.regionCounts
 
     return NextResponse.json({
       ok: true,
@@ -100,12 +97,11 @@ export async function GET(req: NextRequest) {
       complexListingCount: listingCount,
       complexListingLatestDealDate: listingDate,
       homeSummaryLatestDealDate,
-      homeSummaryRegionCount: Array.isArray((homeSummary as any)?.regionCounts)
-        ? (homeSummary as any).regionCounts.length
-        : 0,
+      homeSummaryRegionCount: Array.isArray(regionCounts) ? regionCounts.length : 0,
       health: {
         collect: latestDealDate ? 'healthy' : 'danger',
-        mapping: totalUnmatchedCount === 0 ? 'healthy' : totalUnmatchedCount < 100 ? 'warning' : 'danger',
+        mapping:
+          totalUnmatchedCount === 0 ? 'healthy' : totalUnmatchedCount < 100 ? 'warning' : 'danger',
         listing: sameDay(latestDealDate, listingDate) ? 'healthy' : listingDate ? 'warning' : 'danger',
         summary: sameDay(latestDealDate, homeSummaryLatestDealDate)
           ? 'healthy'
@@ -114,11 +110,12 @@ export async function GET(req: NextRequest) {
             : 'danger',
       },
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'status route error'
     return NextResponse.json(
       {
         ok: false,
-        message: error?.message || 'status route error',
+        message,
       },
       { status: 500 }
     )
