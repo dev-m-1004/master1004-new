@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getHomeSummary } from '@/lib/home-data'
+import {
+  getCurrentStage,
+  getLightweightHomeSummaryDate,
+  listRecentAdminOpsJobs,
+} from '@/lib/admin-ops/jobs'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
 function unauthorized() {
@@ -24,20 +28,14 @@ export async function GET(req: NextRequest) {
       return unauthorized()
     }
 
-    const [latestTx, totalUnmatchedCount, listingLatest, listingCount, homeSummary] = await Promise.all([
+    const [latestTx, listingLatest, recentJobs] = await Promise.all([
       supabaseAdmin
         .from('transactions')
-        .select('deal_date', { head: false })
+        .select('deal_date')
         .not('deal_date', 'is', null)
         .order('deal_date', { ascending: false })
         .limit(1)
         .maybeSingle(),
-      getCount(
-        supabaseAdmin
-          .from('transactions')
-          .select('*', { count: 'exact', head: true })
-          .is('complex_id', null)
-      ),
       supabaseAdmin
         .from('complex_listing_mv')
         .select('latest_deal_year, latest_deal_month, latest_deal_day')
@@ -46,18 +44,14 @@ export async function GET(req: NextRequest) {
         .order('latest_deal_day', { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle(),
-      getCount(
-        supabaseAdmin
-          .from('complex_listing_mv')
-          .select('*', { count: 'exact', head: true })
-      ),
-      getHomeSummary(),
+      listRecentAdminOpsJobs(8),
     ])
 
     if (latestTx.error) throw latestTx.error
     if (listingLatest.error) throw listingLatest.error
 
     const latestDealDate = latestTx.data?.deal_date ? String(latestTx.data.deal_date) : null
+    const homeSummaryLatestDealDate = await getLightweightHomeSummaryDate()
 
     const [todayTransactionCount, latestDealUnmatchedCount] = latestDealDate
       ? await Promise.all([
@@ -84,24 +78,36 @@ export async function GET(req: NextRequest) {
         ? `${listingLatest.data.latest_deal_year}-${String(listingLatest.data.latest_deal_month).padStart(2, '0')}-${String(listingLatest.data.latest_deal_day).padStart(2, '0')}`
         : null
 
-    const homeSummaryLatestDealDate = (homeSummary as { latestDealDate?: string | null })?.latestDealDate || null
-    const regionCounts = (homeSummary as { regionCounts?: unknown[] })?.regionCounts
+    const latestSuccessJob = recentJobs.find((job) => job.status === 'completed') || null
+    const latestFailedJob = recentJobs.find((job) => job.status === 'failed') || null
 
     return NextResponse.json({
       ok: true,
       checkedAt: new Date().toISOString(),
       latestDealDate,
       todayTransactionCount,
-      totalUnmatchedCount,
       latestDealUnmatchedCount,
-      complexListingCount: listingCount,
       complexListingLatestDealDate: listingDate,
       homeSummaryLatestDealDate,
-      homeSummaryRegionCount: Array.isArray(regionCounts) ? regionCounts.length : 0,
+      latestSuccessAt: latestSuccessJob?.finishedAt || null,
+      latestFailureMessage: latestFailedJob?.errorMessage || null,
+      recentJobs: recentJobs.map((job) => ({
+        id: job.id,
+        jobType: job.jobType,
+        status: job.status,
+        currentStage: job.status === 'completed' ? null : getCurrentStage(job),
+        targetGroup: job.payload.group || null,
+        recentDays: job.payload.recentDays,
+        batchLimit: job.payload.batchLimit,
+        createdAt: job.createdAt,
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+        errorMessage: job.errorMessage,
+        stepResults: job.stepResults,
+      })),
       health: {
         collect: latestDealDate ? 'healthy' : 'danger',
-        mapping:
-          totalUnmatchedCount === 0 ? 'healthy' : totalUnmatchedCount < 100 ? 'warning' : 'danger',
+        mapping: latestDealUnmatchedCount === 0 ? 'healthy' : latestDealUnmatchedCount < 100 ? 'warning' : 'danger',
         listing: sameDay(latestDealDate, listingDate) ? 'healthy' : listingDate ? 'warning' : 'danger',
         summary: sameDay(latestDealDate, homeSummaryLatestDealDate)
           ? 'healthy'

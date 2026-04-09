@@ -57,8 +57,8 @@ begin
 end;
 $$;
 
--- 운영 DB에서는 CREATE INDEX CONCURRENTLY 를 개별 실행하세요.
--- 아래 2개 문장은 반드시 "한 줄씩 따로" 실행해야 합니다.
+-- Run the indexes below one line at a time in Supabase SQL Editor.
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block.
 
 create index concurrently if not exists idx_transactions_unmatched_recent
 on public.transactions (deal_date desc, id desc)

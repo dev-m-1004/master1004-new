@@ -6,48 +6,7 @@ type HealthTone = 'healthy' | 'warning' | 'danger'
 type ActionMode = 'collect' | 'map' | 'listing' | 'summary' | 'postprocess' | 'all'
 type CollectGroup = '1' | '2' | '3' | '4'
 
-type OpsStatus = {
-  ok: boolean
-  checkedAt: string
-  latestDealDate: string | null
-  todayTransactionCount: number
-  totalUnmatchedCount: number
-  latestDealUnmatchedCount: number
-  complexListingCount: number
-  complexListingLatestDealDate: string | null
-  homeSummaryLatestDealDate: string | null
-  homeSummaryRegionCount: number
-  health: {
-    collect: HealthTone
-    mapping: HealthTone
-    listing: HealthTone
-    summary: HealthTone
-  }
-}
-
-type CollectResult = {
-  ok: boolean
-  months: string[]
-  groups: Array<{
-    group: string
-    lawdCodeCount: number
-    resultCount: number
-    errorCount: number
-  }>
-  startedAt?: string
-  finishedAt?: string
-  durationMs?: number
-  steps?: Array<{
-    key: string
-    ok: boolean
-    message: string
-    startedAt?: string
-    finishedAt?: string
-    durationMs?: number
-  }>
-}
-
-type PostprocessStep = {
+type StepResult = {
   key: string
   ok: boolean
   message: string
@@ -56,22 +15,52 @@ type PostprocessStep = {
   durationMs?: number
 }
 
-type ActionResult = {
+type JobItem = {
+  id: string
+  jobType: ActionMode
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  currentStage: string | null
+  targetGroup?: CollectGroup | null
+  recentDays: number
+  batchLimit: number
+  createdAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  errorMessage?: string | null
+  stepResults: StepResult[]
+}
+
+type OpsStatus = {
+  ok: boolean
+  checkedAt: string
+  latestDealDate: string | null
+  todayTransactionCount: number
+  latestDealUnmatchedCount: number
+  complexListingLatestDealDate: string | null
+  homeSummaryLatestDealDate: string | null
+  latestSuccessAt: string | null
+  latestFailureMessage: string | null
+  recentJobs: JobItem[]
+  health: {
+    collect: HealthTone
+    mapping: HealthTone
+    listing: HealthTone
+    summary: HealthTone
+  }
+}
+
+type RunJobResponse = {
   ok: boolean
   mode: ActionMode
-  startedAt: string
-  finishedAt: string
-  durationMs: number
-  collect?: CollectResult
-  postprocess?: {
-    ok: boolean
-    steps: PostprocessStep[]
-  }
-  options?: {
+  jobId: string
+  status: 'queued'
+  targetGroup?: CollectGroup | null
+  options: {
     recentDays: number
     batchLimit: number
   }
-  targetGroup?: CollectGroup | null
+  queuedAt?: string | null
+  message?: string
   error?: string
 }
 
@@ -152,23 +141,23 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 const modeLabelMap: Record<ActionMode, string> = {
-  collect: '자료수집',
-  map: '매핑',
-  listing: '메인 리스트 갱신',
-  summary: '홈 요약 갱신',
-  postprocess: '전체 후처리',
-  all: '전체 실행',
+  collect: 'GROUP 수집 시작',
+  map: '매핑만 시작',
+  listing: '리스트만 시작',
+  summary: '홈 요약만 시작',
+  postprocess: '후처리 시작',
+  all: '전체 파이프라인 시작',
 }
 
 export default function AdminOpsClient() {
   const [secret, setSecret] = useState('')
   const [status, setStatus] = useState<OpsStatus | null>(null)
   const [loadingStatus, setLoadingStatus] = useState(false)
-  const [runningMode, setRunningMode] = useState<ActionMode | null>(null)
+  const [startingMode, setStartingMode] = useState<ActionMode | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [result, setResult] = useState<ActionResult | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [logs, setLogs] = useState<LogItem[]>([])
-  const [collectGroup, setCollectGroup] = useState<'' | CollectGroup>('1')
+  const [collectGroup, setCollectGroup] = useState<'' | CollectGroup>('')
   const [recentDays, setRecentDays] = useState('3')
   const [batchLimit, setBatchLimit] = useState('5000')
 
@@ -211,11 +200,11 @@ export default function AdminOpsClient() {
 
       const json = await readJson<OpsStatus & { message?: string }>(res)
       if (!res.ok || !json.ok) {
-        throw new Error((json as { message?: string }).message || '상태 조회에 실패했습니다.')
+        throw new Error(json.message || '상태 조회에 실패했습니다.')
       }
 
       setStatus(json)
-      pushLog('success', '상태를 새로고침했습니다.', `최근 거래일: ${json.latestDealDate ?? '-'}`)
+      pushLog('success', '상태를 새로고침했습니다.', `최근 작업 수: ${json.recentJobs.length}개`)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : '알 수 없는 오류'
       pushLog('error', '상태 조회 실패', message)
@@ -227,11 +216,11 @@ export default function AdminOpsClient() {
   useEffect(() => {
     if (!secret.trim() || !autoRefresh) return
     loadStatus()
-    const timer = window.setInterval(loadStatus, 60000)
+    const timer = window.setInterval(loadStatus, 20000)
     return () => window.clearInterval(timer)
   }, [autoRefresh, loadStatus, secret])
 
-  const runAction = useCallback(
+  const startJob = useCallback(
     async (mode: ActionMode) => {
       if (!secret.trim()) {
         pushLog('error', '관리자 키가 필요합니다.', '먼저 관리자 키를 입력하고 저장해 주세요.')
@@ -240,14 +229,8 @@ export default function AdminOpsClient() {
 
       const recentDaysValue = Math.max(1, Number(recentDays) || 3)
       const batchLimitValue = Math.max(1, Number(batchLimit) || 5000)
-      const body = {
-        mode,
-        group: collectGroup || undefined,
-        recentDays: recentDaysValue,
-        batchLimit: batchLimitValue,
-      }
 
-      setRunningMode(mode)
+      setStartingMode(mode)
       try {
         const res = await fetch('/api/admin/ops/run', {
           method: 'POST',
@@ -255,26 +238,30 @@ export default function AdminOpsClient() {
             'Content-Type': 'application/json',
             'x-admin-secret': secret.trim(),
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            mode,
+            group: collectGroup || undefined,
+            recentDays: recentDaysValue,
+            batchLimit: batchLimitValue,
+          }),
         })
 
-        const json = await readJson<ActionResult & { message?: string }>(res)
+        const json = await readJson<RunJobResponse & { message?: string }>(res)
         if (!res.ok || !json.ok) {
-          throw new Error(json.error || json.message || '실행에 실패했습니다.')
+          throw new Error(json.error || json.message || '작업 시작에 실패했습니다.')
         }
 
-        setResult(json)
-        const extra =
-          mode === 'collect'
-            ? `대상: ${json.targetGroup ? `GROUP ${json.targetGroup}` : '전체 그룹'}`
-            : `소요 시간: ${formatDuration(json.durationMs)}`
-        pushLog('success', `${modeLabelMap[mode]} 완료`, extra)
+        pushLog(
+          'success',
+          `${modeLabelMap[mode]} 완료`,
+          `job_id=${json.jobId}, status=${json.status}`
+        )
         await loadStatus()
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : '알 수 없는 오류'
         pushLog('error', `${modeLabelMap[mode]} 실패`, message)
       } finally {
-        setRunningMode(null)
+        setStartingMode(null)
       }
     },
     [batchLimit, collectGroup, loadStatus, pushLog, recentDays, secret]
@@ -289,64 +276,25 @@ export default function AdminOpsClient() {
         hint: 'transactions 기준',
       },
       {
-        title: '오늘 수집 건수',
-        value: `${status.todayTransactionCount.toLocaleString()}건`,
-        hint: '오늘 거래 적재 수',
-      },
-      {
-        title: '미연결 거래',
-        value: `${status.totalUnmatchedCount.toLocaleString()}건`,
-        hint: 'complex_id is null',
+        title: '최신 미연결 거래',
+        value: `${status.latestDealUnmatchedCount.toLocaleString()}건`,
+        hint: 'latest deal_date + complex_id is null',
       },
       {
         title: '메인 최신 거래일',
         value: status.complexListingLatestDealDate ?? '-',
         hint: 'complex_listing_mv 기준',
       },
+      {
+        title: '홈 요약 최신 거래일',
+        value: status.homeSummaryLatestDealDate ?? '-',
+        hint: 'home_tx_week_complex_mv 기준',
+      },
     ]
   }, [status])
 
-  const operationSummary = useMemo(() => {
-    if (!result) return []
-    const rows: Array<{ label: string; value: string }> = [
-      { label: '실행 모드', value: modeLabelMap[result.mode] },
-      {
-        label: '수집 대상 그룹',
-        value: result.targetGroup ? `GROUP ${result.targetGroup}` : '전체 그룹',
-      },
-      { label: '시작 시각', value: formatDateTime(result.startedAt) },
-      { label: '종료 시각', value: formatDateTime(result.finishedAt) },
-      { label: '총 소요 시간', value: formatDuration(result.durationMs) },
-    ]
-
-    if (result.options) {
-      rows.push({ label: '최근 거래 기준', value: `${result.options.recentDays}일` })
-      rows.push({ label: '배치 한도', value: `${result.options.batchLimit.toLocaleString()}건` })
-    }
-
-    if (result.collect) {
-      rows.push({ label: '수집 대상 월', value: result.collect.months.join(', ') })
-      rows.push({
-        label: '수집 그룹 결과',
-        value: result.collect.groups
-          .map((group) => `G${group.group}: ${group.resultCount}건 / 오류 ${group.errorCount}`)
-          .join(' · '),
-      })
-    }
-
-    if (result.postprocess) {
-      rows.push({
-        label: '후처리 단계',
-        value: result.postprocess.steps
-          .map((step) => `${step.key}:${step.ok ? '완료' : '실패'}(${formatDuration(step.durationMs)})`)
-          .join(' · '),
-      })
-    }
-
-    return rows
-  }, [result])
-
-  const canRun = !!secret.trim() && !runningMode
+  const activeJobs = status?.recentJobs.filter((job) => job.status === 'queued' || job.status === 'running') || []
+  const canStart = !!secret.trim() && !startingMode
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -358,16 +306,16 @@ export default function AdminOpsClient() {
                 MASTER1004 운영실
               </div>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                자료수집은 그룹 단위로, 후처리는 단계별로 분리해 운영하세요
+                Admin Ops를 비동기 잡 기반 운영툴로 전환했습니다
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200 sm:text-base">
-                자료수집 timeout을 줄이기 위해 group 단위 수집을 먼저 권장합니다. 후처리는
-                매핑 → 메인 리스트 → 홈 요약 순서로 쪼개 실행할 수 있게 구성했습니다.
+                이제 브라우저는 긴 후처리를 기다리지 않습니다. 운영자는 작업 시작과 상태 확인만 담당하고,
+                실제 collect / map / listing / summary는 worker가 순차 처리합니다.
               </p>
               <div className="mt-5 flex flex-wrap gap-2 text-xs text-slate-200">
-                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">collect 분할</span>
-                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">map / listing / summary</span>
-                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">단계별 duration 기록</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">비동기 job queue</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">worker stage processing</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 ring-1 ring-white/15">HTTP timeout 분리</span>
               </div>
             </div>
 
@@ -388,6 +336,43 @@ export default function AdminOpsClient() {
                   저장
                 </button>
               </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <FieldBox label="자료수집 그룹">
+                  <select
+                    value={collectGroup}
+                    onChange={(e) => setCollectGroup(e.target.value as '' | CollectGroup)}
+                    className="w-full rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white outline-none"
+                  >
+                    {COLLECT_GROUP_OPTIONS.map((option) => (
+                      <option key={option.label} value={option.value} className="text-slate-900">
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </FieldBox>
+                <FieldBox label="recentDays">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={recentDays}
+                    onChange={(e) => setRecentDays(e.target.value)}
+                    className="w-full rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </FieldBox>
+                <FieldBox label="batchLimit">
+                  <input
+                    type="number"
+                    min={1}
+                    step={100}
+                    value={batchLimit}
+                    onChange={(e) => setBatchLimit(e.target.value)}
+                    className="w-full rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </FieldBox>
+              </div>
+
               <div className="mt-3 flex items-center justify-between rounded-2xl bg-white/10 px-4 py-3 text-sm text-slate-100 ring-1 ring-white/15">
                 <span>상태 자동 새로고침</span>
                 <button
@@ -412,7 +397,7 @@ export default function AdminOpsClient() {
                 disabled={loadingStatus}
                 className="mt-3 w-full rounded-2xl bg-sky-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-sky-300"
               >
-                {loadingStatus ? '상태 확인 중...' : '지금 상태 확인'}
+                {loadingStatus ? '상태 확인 중...' : '상태 새로고침'}
               </button>
             </div>
           </div>
@@ -426,161 +411,114 @@ export default function AdminOpsClient() {
               <div className="mt-1 text-xs text-slate-500">{card.hint}</div>
             </div>
           ))}
-          {!status &&
-            Array.from({ length: 4 }).map((_, idx) => (
-              <div key={idx} className="rounded-[24px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
-                <div className="h-4 w-24 animate-pulse rounded bg-slate-200" />
-                <div className="mt-4 h-8 w-28 animate-pulse rounded bg-slate-200" />
-                <div className="mt-3 h-3 w-20 animate-pulse rounded bg-slate-200" />
-              </div>
-            ))}
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">운영 실행 패널</h2>
+                <h2 className="text-lg font-semibold text-slate-900">작업 시작 패널</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  timeout 회피를 위해 자료수집은 그룹 단위, 후처리는 단계 단위로 실행하는 구성을 반영했습니다.
+                  운영자는 이제 긴 작업 완료를 기다리지 않습니다. 버튼을 누르면 job이 큐에 들어가고 worker가 처리합니다.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((prev) => !prev)}
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
+              >
+                {showAdvanced ? '고급 작업 숨기기' : '고급 작업 보기'}
+              </button>
             </div>
 
-            <div className="mt-5 grid gap-4 rounded-[24px] bg-slate-50 p-4 ring-1 ring-slate-200 md:grid-cols-3">
-              <FieldBox label="자료수집 그룹">
-                <select
-                  value={collectGroup}
-                  onChange={(e) => setCollectGroup(e.target.value as '' | CollectGroup)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-400"
-                >
-                  {COLLECT_GROUP_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBox>
-              <FieldBox label="최근 거래 기준(일)">
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={recentDays}
-                  onChange={(e) => setRecentDays(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-400"
-                />
-              </FieldBox>
-              <FieldBox label="매핑 배치 한도">
-                <input
-                  type="number"
-                  min={1}
-                  step={100}
-                  value={batchLimit}
-                  onChange={(e) => setBatchLimit(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-400"
-                />
-              </FieldBox>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
               <ActionCard
-                title="자료수집 실행"
-                description={collectGroup ? `선택한 GROUP ${collectGroup}만 수집합니다.` : 'group 1~4 전체를 순서대로 수집합니다.'}
-                buttonLabel={runningMode === 'collect' ? '자료수집 실행 중...' : collectGroup ? `GROUP ${collectGroup} 수집` : '전체 그룹 수집'}
+                title={collectGroup ? `GROUP ${collectGroup} 수집 시작` : '전체 그룹 수집 시작'}
+                description="자료수집 job만 큐에 넣습니다. timeout이 걱정되면 GROUP 1부터 차례대로 실행하세요."
                 buttonTone="slate"
-                onClick={() => runAction('collect')}
-                disabled={!canRun}
+                buttonLabel={startingMode === 'collect' ? 'job 생성 중...' : 'GROUP 수집 시작'}
+                onClick={() => startJob('collect')}
+                disabled={!canStart}
               />
               <ActionCard
-                title="매핑 실행"
-                description="최근 거래만 complex_id 매핑합니다. recent RPC가 없으면 TODO 메시지를 보여줍니다."
-                buttonLabel={runningMode === 'map' ? '매핑 실행 중...' : '매핑'}
-                buttonTone="violet"
-                onClick={() => runAction('map')}
-                disabled={!canRun}
-              />
-              <ActionCard
-                title="메인 리스트 갱신"
-                description="complex_listing_mv 새로고침만 단독 실행합니다."
-                buttonLabel={runningMode === 'listing' ? '메인 리스트 갱신 중...' : '메인 리스트'}
-                buttonTone="emerald"
-                onClick={() => runAction('listing')}
-                disabled={!canRun}
-              />
-              <ActionCard
-                title="홈 요약 갱신"
-                description="home summary MV 갱신만 단독 실행합니다."
-                buttonLabel={runningMode === 'summary' ? '홈 요약 갱신 중...' : '홈 요약'}
-                buttonTone="amber"
-                onClick={() => runAction('summary')}
-                disabled={!canRun}
-              />
-              <ActionCard
-                title="전체 후처리"
-                description="매핑 → 메인 리스트 → 홈 요약 순서로 실행합니다."
-                buttonLabel={runningMode === 'postprocess' ? '전체 후처리 중...' : '전체 후처리'}
+                title="전체 파이프라인 시작"
+                description="collect -> map -> listing -> summary를 worker가 단계별로 처리합니다. 운영 기본 경로는 이 버튼입니다."
                 buttonTone="sky"
-                onClick={() => runAction('postprocess')}
-                disabled={!canRun}
-              />
-              <ActionCard
-                title="전체 실행"
-                description="선택 그룹 수집 후 전체 후처리까지 이어서 실행합니다. timeout 가능성이 있어 점검용으로만 권장합니다."
-                buttonLabel={runningMode === 'all' ? '전체 실행 중...' : '전체 실행'}
-                buttonTone="rose"
-                onClick={() => runAction('all')}
-                disabled={!canRun}
+                buttonLabel={startingMode === 'all' ? 'job 생성 중...' : '전체 파이프라인 시작'}
+                onClick={() => startJob('all')}
+                disabled={!canStart}
               />
             </div>
+
+            {showAdvanced ? (
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <ActionCard
+                  title="매핑만 시작"
+                  description="최근 거래의 complex_id 매핑 job을 큐에 넣습니다."
+                  buttonTone="violet"
+                  buttonLabel={startingMode === 'map' ? 'job 생성 중...' : '매핑'}
+                  onClick={() => startJob('map')}
+                  disabled={!canStart}
+                />
+                <ActionCard
+                  title="리스트만 시작"
+                  description="complex_listing_mv refresh job을 큐에 넣습니다."
+                  buttonTone="emerald"
+                  buttonLabel={startingMode === 'listing' ? 'job 생성 중...' : '리스트'}
+                  onClick={() => startJob('listing')}
+                  disabled={!canStart}
+                />
+                <ActionCard
+                  title="홈 요약만 시작"
+                  description="home summary refresh job을 큐에 넣습니다."
+                  buttonTone="amber"
+                  buttonLabel={startingMode === 'summary' ? 'job 생성 중...' : '홈 요약'}
+                  onClick={() => startJob('summary')}
+                  disabled={!canStart}
+                />
+                <ActionCard
+                  title="후처리만 시작"
+                  description="map -> listing -> summary 잡 체인을 큐에 넣습니다."
+                  buttonTone="rose"
+                  buttonLabel={startingMode === 'postprocess' ? 'job 생성 중...' : '후처리'}
+                  onClick={() => startJob('postprocess')}
+                  disabled={!canStart}
+                />
+              </div>
+            ) : null}
 
             <div className="mt-5 rounded-[24px] bg-slate-50 p-4 ring-1 ring-slate-200">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-slate-900">실행 결과 요약</h3>
-                {result ? (
-                  <span
-                    className={cn(
-                      'rounded-full px-3 py-1 text-xs font-medium ring-1',
-                      result.ok
-                        ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                        : 'bg-rose-50 text-rose-700 ring-rose-200'
-                    )}
-                  >
-                    {result.ok ? '완료' : '실패'}
-                  </span>
-                ) : null}
+                <h3 className="text-sm font-semibold text-slate-900">최근 상태</h3>
+                <div className="text-xs text-slate-500">
+                  최근 성공: {formatDateTime(status?.latestSuccessAt)}
+                </div>
               </div>
-              {operationSummary.length > 0 ? (
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  {operationSummary.map((row) => (
-                    <div key={row.label} className="rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
-                      <div className="text-xs font-medium text-slate-500">{row.label}</div>
-                      <div className="mt-1 text-sm font-semibold text-slate-900">{row.value}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-3 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
-                  아직 실행 기록이 없습니다. 먼저 상태를 확인하고 필요한 버튼을 눌러 보세요.
-                </div>
-              )}
-
-              {result?.postprocess?.steps?.length ? (
-                <div className="mt-4 space-y-2">
-                  {result.postprocess.steps.map((step) => (
-                    <div key={`${step.key}-${step.startedAt || ''}`} className="rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-slate-900">{step.key}</div>
-                        <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium ring-1', step.ok ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-rose-200')}>
-                          {step.ok ? '완료' : '실패'}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-sm text-slate-600">{step.message}</div>
-                      <div className="mt-2 text-xs text-slate-500">
-                        {formatDateTime(step.startedAt)} → {formatDateTime(step.finishedAt)} · {formatDuration(step.durationMs)}
-                      </div>
-                    </div>
-                  ))}
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <HealthRow
+                  label="수집 상태"
+                  value={status?.health.collect ?? 'warning'}
+                  detail={`최근 거래일: ${status?.latestDealDate ?? '-'}`}
+                />
+                <HealthRow
+                  label="매핑 상태"
+                  value={status?.health.mapping ?? 'warning'}
+                  detail={`최신 미연결 거래: ${status?.latestDealUnmatchedCount ?? 0}건`}
+                />
+                <HealthRow
+                  label="메인 리스트"
+                  value={status?.health.listing ?? 'warning'}
+                  detail={`메인 최신 거래일: ${status?.complexListingLatestDealDate ?? '-'}`}
+                />
+                <HealthRow
+                  label="홈 요약"
+                  value={status?.health.summary ?? 'warning'}
+                  detail={`홈 최신 거래일: ${status?.homeSummaryLatestDealDate ?? '-'}`}
+                />
+              </div>
+              {status?.latestFailureMessage ? (
+                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  최근 실패 메시지: {status.latestFailureMessage}
                 </div>
               ) : null}
             </div>
@@ -588,34 +526,30 @@ export default function AdminOpsClient() {
 
           <div className="space-y-6">
             <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <h2 className="text-lg font-semibold text-slate-900">운영 건강 상태</h2>
-              <div className="mt-4 grid gap-3">
-                <HealthRow label="수집 상태" value={status?.health.collect ?? 'warning'} detail={`최근 거래일: ${status?.latestDealDate ?? '-'}`} />
-                <HealthRow label="매핑 상태" value={status?.health.mapping ?? 'warning'} detail={`미연결 거래: ${status?.totalUnmatchedCount ?? '-'}건`} />
-                <HealthRow label="메인 리스트" value={status?.health.listing ?? 'warning'} detail={`메인 최신 거래일: ${status?.complexListingLatestDealDate ?? '-'}`} />
-                <HealthRow label="홈 요약" value={status?.health.summary ?? 'warning'} detail={`요약 최신 거래일: ${status?.homeSummaryLatestDealDate ?? '-'}`} />
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-slate-900">대기/실행 중 작업</h2>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {activeJobs.length}개
+                </span>
+              </div>
+              <div className="mt-4 space-y-3">
+                {activeJobs.length > 0 ? (
+                  activeJobs.map((job) => (
+                    <JobCard key={job.id} job={job} emphasize />
+                  ))
+                ) : (
+                  <EmptyBox text="현재 대기 중이거나 실행 중인 작업이 없습니다." />
+                )}
               </div>
             </div>
 
             <div className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <h2 className="text-lg font-semibold text-slate-900">운영 콘솔</h2>
+              <h2 className="text-lg font-semibold text-slate-900">최근 작업 이력</h2>
               <div className="mt-4 space-y-3">
-                {logs.length > 0 ? (
-                  logs.map((log) => (
-                    <div key={log.id} className={cn('rounded-2xl border px-4 py-3', toneByLog(log.level))}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-slate-900">{log.title}</div>
-                          {log.body ? <div className="mt-1 text-sm text-slate-600">{log.body}</div> : null}
-                        </div>
-                        <div className="shrink-0 text-xs text-slate-400">{formatDateTime(log.time)}</div>
-                      </div>
-                    </div>
-                  ))
+                {status?.recentJobs?.length ? (
+                  status.recentJobs.map((job) => <JobCard key={job.id} job={job} />)
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
-                    아직 로그가 없습니다. 상태 확인 또는 실행 버튼을 눌러 보세요.
-                  </div>
+                  <EmptyBox text="아직 작업 이력이 없습니다." />
                 )}
               </div>
             </div>
@@ -623,32 +557,23 @@ export default function AdminOpsClient() {
         </section>
 
         <section className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">운영 가이드</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <GuideCard
-              title="권장 실행 순서"
-              items={[
-                '1차는 GROUP 1만 자료수집을 실행합니다.',
-                '자료수집 성공 후 매핑 → 메인 리스트 → 홈 요약 순서로 실행합니다.',
-                '전체 실행은 야간 점검용으로만 사용합니다.',
-              ]}
-            />
-            <GuideCard
-              title="오류가 날 때"
-              items={[
-                '자료수집 timeout이면 그룹을 더 잘게 나누거나 cron으로 옮깁니다.',
-                '매핑 TODO가 보이면 Supabase recent RPC를 먼저 생성합니다.',
-                'listing 또는 summary만 느리면 해당 MV부터 따로 점검합니다.',
-              ]}
-            />
-            <GuideCard
-              title="권장 기본값"
-              items={[
-                'recentDays = 3',
-                'batchLimit = 5000',
-                '첫 테스트는 전체 그룹이 아닌 GROUP 1부터 시작',
-              ]}
-            />
+          <h2 className="text-lg font-semibold text-slate-900">운영 콘솔</h2>
+          <div className="mt-4 space-y-3">
+            {logs.length > 0 ? (
+              logs.map((log) => (
+                <div key={log.id} className={cn('rounded-2xl border px-4 py-3', toneByLog(log.level))}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{log.title}</div>
+                      {log.body ? <div className="mt-1 text-sm text-slate-600">{log.body}</div> : null}
+                    </div>
+                    <div className="shrink-0 text-xs text-slate-400">{formatDateTime(log.time)}</div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyBox text="아직 로그가 없습니다. 작업 시작 또는 상태 새로고침을 눌러 보세요." />
+            )}
           </div>
         </section>
       </div>
@@ -658,10 +583,10 @@ export default function AdminOpsClient() {
 
 function FieldBox({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+    <label className="block">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-300">{label}</div>
       {children}
-    </div>
+    </label>
   )
 }
 
@@ -725,15 +650,60 @@ function HealthRow({ label, value, detail }: { label: string; value: HealthTone;
   )
 }
 
-function GuideCard({ title, items }: { title: string; items: string[] }) {
+function JobCard({ job, emphasize = false }: { job: JobItem; emphasize?: boolean }) {
+  const statusTone =
+    job.status === 'completed'
+      ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+      : job.status === 'failed'
+        ? 'bg-rose-50 text-rose-700 ring-rose-200'
+        : job.status === 'running'
+          ? 'bg-sky-50 text-sky-700 ring-sky-200'
+          : 'bg-amber-50 text-amber-700 ring-amber-200'
+
   return (
-    <div className="rounded-[24px] bg-slate-50 p-5 ring-1 ring-slate-200">
-      <div className="text-base font-semibold text-slate-900">{title}</div>
-      <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-        {items.map((item) => (
-          <div key={item}>• {item}</div>
-        ))}
+    <div className={cn('rounded-[24px] border px-4 py-4', emphasize ? 'border-sky-200 bg-sky-50/40' : 'border-slate-200 bg-slate-50')}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">
+            {job.jobType} · {job.id.slice(0, 8)}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            {job.targetGroup ? `GROUP ${job.targetGroup}` : '전체 그룹'} · recentDays={job.recentDays} · batchLimit={job.batchLimit}
+          </div>
+        </div>
+        <span className={cn('rounded-full px-3 py-1 text-xs font-semibold ring-1', statusTone)}>
+          {job.status}
+        </span>
       </div>
+      <div className="mt-3 text-sm text-slate-600">
+        현재 단계: {job.currentStage || '-'} · 시작: {formatDateTime(job.startedAt)} · 종료: {formatDateTime(job.finishedAt)}
+      </div>
+      {job.errorMessage ? (
+        <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {job.errorMessage}
+        </div>
+      ) : null}
+      {job.stepResults.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {job.stepResults.map((step) => (
+            <div key={`${job.id}-${step.key}-${step.startedAt || ''}`} className="rounded-2xl bg-white px-3 py-2 ring-1 ring-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="font-semibold text-slate-900">{step.key}</div>
+                <div className="text-slate-500">{formatDuration(step.durationMs)}</div>
+              </div>
+              <div className="mt-1 text-sm text-slate-600">{step.message}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function EmptyBox({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500">
+      {text}
     </div>
   )
 }
