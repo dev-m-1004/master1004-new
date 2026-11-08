@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import { supabase } from '@/lib/supabase'
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
@@ -14,7 +14,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ]
 
   try {
-    const { data } = await supabaseAdmin
+    const { data } = await supabase
       .from('complex_listing_mv')
       .select('id, latest_deal_year, latest_deal_month, latest_deal_day')
       .order('latest_deal_year', { ascending: false, nullsFirst: false })

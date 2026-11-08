@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import { supabase } from '@/lib/supabase'
 
 export type TrendPoint = {
   year: string
@@ -70,7 +70,7 @@ function mapRegionName(regionCode?: string | null) {
 }
 
 async function getLatestDealDate() {
-  const { data: mvData, error: mvError } = await supabaseAdmin
+  const { data: mvData, error: mvError } = await supabase
     .from('home_tx_week_complex_mv')
     .select('deal_date')
     .order('deal_date', { ascending: false })
@@ -81,7 +81,7 @@ async function getLatestDealDate() {
     return String(mvData.deal_date)
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('transactions')
     .select('deal_year, deal_month, deal_day')
     .not('deal_year', 'is', null)
@@ -100,7 +100,7 @@ async function getLatestDealDate() {
 }
 
 export async function getHomeTrend(): Promise<TrendPoint[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('home_tx_year_counts_mv')
     .select('deal_year, tx_count')
     .gte('deal_year', TREND_YEARS[0])
@@ -125,7 +125,7 @@ export async function getHomeRegions(): Promise<RegionCount[]> {
   const latestYear = latestDealDate ? Number(String(latestDealDate).slice(0, 4)) : new Date().getFullYear()
   const baseYear = latestYear - 4
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('home_tx_region_year_counts_mv')
     .select('region_code, deal_year, tx_count')
     .gte('deal_year', baseYear)
@@ -161,7 +161,7 @@ async function getWeekRows(): Promise<WeekRow[]> {
 
   const startStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('home_tx_week_complex_mv')
     .select('deal_date, region_code, complex_id, apartment_name, area_m2, top_price_krw, tx_count')
     .gte('deal_date', startStr)

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import { supabase } from '@/lib/supabase'
 import ComplexDetailClient from './complex-detail-client'
 
 type PageProps = {
@@ -51,7 +51,7 @@ function getMinDealYear() {
 }
 
 async function fetchComplexById(id: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('complexes')
     .select('*')
     .eq('id', id)
@@ -113,7 +113,7 @@ export default async function Page({ params }: PageProps) {
   const [{ data: complexById, error: complexError }, { data: transactions, error: transactionsError }] =
     await Promise.all([
       fetchComplexById(id),
-      supabaseAdmin
+      supabase
         .from('transactions')
         .select(`
           id,
