@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import { supabase } from '@/lib/supabase'
 
 const PAGE_SIZE_DEFAULT = 30
 const PAGE_SIZE_MAX = 60
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
       lawdCode,
     })
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('complex_listing_mv')
       .select(
         `
